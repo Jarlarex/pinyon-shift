@@ -26,7 +26,10 @@
     ".keystore",
     ".jks",
     ".dex",
-    ".class"
+    ".class",
+    ".xexp",
+    ".pkg",
+    ".partial"
   ],
   "forbidden_path_segments": [
     ".local",
@@ -41,12 +44,15 @@
     "out"
   ],
   "forbidden_file_name_patterns": [
-    "^TU_"
+    "^TU_",
+    "^tu[0-9a-f]{8}_[0-9a-f]{8}$"
   ],
   "forbidden_magic_ascii": [
     "XEX2",
     "MZ",
-    "\u007fELF"
+    "\u007fELF",
+    "LIVE",
+    "PIRS"
   ],
   "allowed_large_files": []
 }

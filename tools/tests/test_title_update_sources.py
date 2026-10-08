@@ -338,6 +338,34 @@ class SetupTitleUpdateTests(unittest.TestCase):
         self.assertEqual(calls[0], "build")
 
 
+@unittest.skipUnless(shutil.which("powershell") and shutil.which("git"), "PowerShell and Git required")
+class BoundaryTests(unittest.TestCase):
+    def test_title_update_packages_and_downloads_cannot_be_committed(self):
+        cases = {
+            "tu0000000c_00000000": b"text",
+            "TU0000000C_00000000": b"text",
+            "cache/forza.pkg": b"text",
+            "cache/forza.partial": b"text",
+            "patch/default.xexp": b"text",
+            "renamed-package.bin": b"LIVE" + bytes(16),
+        }
+        for name, data in cases.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory(prefix="pinyon-boundary-") as temporary:
+                root = Path(temporary)
+                (root / "tools").mkdir()
+                (root / "config").mkdir()
+                shutil.copyfile(ROOT / "tools/check-repository-boundary.ps1", root / "tools/check-repository-boundary.ps1")
+                shutil.copyfile(ROOT / "config/repository-policy.json", root / "config/repository-policy.json")
+                path = root / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(data)
+                subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+                result = subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+                                         str(root / "tools/check-repository-boundary.ps1")],
+                                        cwd=root, capture_output=True, text=True)
+                self.assertNotEqual(result.returncode, 0, result.stdout)
+
+
 class SourceListTests(unittest.TestCase):
     def test_sources_name_known_updates_with_http_urls_and_no_hashes(self):
         sources = load("title-update-sources.json")

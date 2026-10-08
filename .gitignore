@@ -92,3 +92,9 @@ Thumbs.db
 *~
 
 BACKLOG.md
+
+# Title-update packages and their downloads (fetch-title-update.py).
+tu[0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]_[0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]
+*.pkg
+*.partial
+*.xexp
