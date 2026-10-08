@@ -18,6 +18,7 @@
 
 #include "pinyon_shift_diagnostics.h"
 #include "ui/hostui/fh1_archive.h"
+#include "ui/hostui/key_release.h"
 #include "ui/hostui/xds_texture.h"
 
 namespace pinyon_shift::hostui {
@@ -998,9 +999,13 @@ void HostUi::OnKeyDown(rex::ui::KeyEvent& e) {
 }
 
 void HostUi::OnKeyUp(rex::ui::KeyEvent& e) {
-  held_keys_.erase(std::remove(held_keys_.begin(), held_keys_.end(), int(e.virtual_key())),
-                   held_keys_.end());
-  if (is_open() && !(e.virtual_key() >= VirtualKey::kF1 && e.virtual_key() <= VirtualKey::kF24)) {
+  const auto held = std::find(held_keys_.begin(), held_keys_.end(), int(e.virtual_key()));
+  const bool pressed_while_open = held != held_keys_.end();
+  if (pressed_while_open) {
+    held_keys_.erase(held);
+  }
+  if (ConsumesKeyRelease(is_open(), pressed_while_open,
+                         e.virtual_key() >= VirtualKey::kF1 && e.virtual_key() <= VirtualKey::kF24)) {
     e.set_handled(true);
   }
 }

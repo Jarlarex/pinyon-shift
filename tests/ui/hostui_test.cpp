@@ -9,6 +9,7 @@
 
 #include "ui/hostui/fh1_archive.h"
 #include "ui/hostui/glyph_atlas.h"
+#include "ui/hostui/key_release.h"
 #include "ui/hostui/menu.h"
 #include "ui/hostui/vector_font.h"
 #include "ui/hostui/xds_texture.h"
@@ -390,6 +391,17 @@ int DumpAtlas(const char* fonts_zip, const char* member, float pixels_per_em, co
   return 0;
 }
 
+// A release of a key that went down before the UI opened reaches the guest's
+// keyboard emulation; otherwise the guest keeps it held (the achievements loop).
+void TestKeyRelease() {
+  using pinyon_shift::hostui::ConsumesKeyRelease;
+  CHECK(ConsumesKeyRelease(true, true, false));
+  CHECK(!ConsumesKeyRelease(true, false, false));
+  CHECK(!ConsumesKeyRelease(true, true, true));
+  CHECK(!ConsumesKeyRelease(false, true, false));
+  CHECK(!ConsumesKeyRelease(false, false, false));
+}
+
 int main(int argc, char** argv) {
   if (argc == 7 && std::string(argv[1]) == "--dump-atlas") {
     return DumpAtlas(argv[2], argv[3], std::stof(argv[4]), argv[5], argv[6]);
@@ -398,6 +410,7 @@ int main(int argc, char** argv) {
   TestVectorFont();
   TestTextures();
   TestMenu();
+  TestKeyRelease();
   if (failures) {
     std::fprintf(stderr, "%d check(s) failed\n", failures);
     return 1;
