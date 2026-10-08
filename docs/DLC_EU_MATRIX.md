@@ -24,13 +24,14 @@ a playtest in the Autoshow and events and are pending.
 | 2011 Mercedes-Benz SLS AMG | `00000001` | yes | yes | strings | yes (player check 2026-10-08) | pending | pending |
 | 2010 Volkswagen Golf R | `00000001` | yes | yes | strings | yes (player check 2026-10-08) | pending | pending |
 | 2013 Ford Mustang Boss 302 - Pizza Hut Edition | `00000000` | yes | yes | not yet | **no**: the package's own licence table grants no bits, so offer 2800 is unowned (player check 2026-10-08: only the base Boss 302 appears) | — | — |
-| Honda Challenge Car Pack | `00000001` | yes | yes | db, effects | yes (player check 2026-10-08) | pending | pending |
+| Honda Challenge Car Pack | `00000001` | yes | yes | db, effects | yes (player check 2026-10-08) | yes: Civic Si bought | yes: kept after restart |
 | January Recaro Car Pack | `FFFFFFFF` | yes | yes | db, effects | yes (player check 2026-10-08) | pending | pending |
 | 2010 Nissan 370Z | `00000001` | yes | yes | strings | yes (player check 2026-10-08) | pending | pending |
 | 1000 Club Expansion Pack | `00000001` | yes | yes | db, effects | yes (player check 2026-10-08) | pending | pending |
 | Rally Expansion Pack | — | **no**: supplied copies were the rejected variant (`AA7BD510…`, twice) and then a truncated file (`53037F21…`, 1,082,493,336 bytes, not block-aligned; the SDK extractor crashes on it) | — | — | — | — | — |
 
 Notes:
+- Purchases persist: a Civic Si and a GMC Vandura bought on the EU save were still owned after a restart (player check 2026-10-08).
 - 1000 Club runs with the update's offline setting on (setup turns it on for the EU disc).
 - "Not yet" means the package mounted but no file was opened before the route ended; the Autoshow check decides.
   The Mustang's licence mask is `00000000` as supplied; it is recorded, never changed.
