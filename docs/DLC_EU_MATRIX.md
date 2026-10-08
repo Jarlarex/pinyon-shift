@@ -8,26 +8,26 @@ a playtest in the Autoshow and events and are pending.
 
 | Package | Licence mask | Installed | Mounted | Read at start | In Autoshow | Bought + driven | Save reload |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| Pre-Order Car Pack | `FFFFFFFF` | yes | yes | db, effects | pending | pending | pending |
-| Season Pass: 2006 Lamborghini Miura Concept | `00000001` | yes | yes | not yet | pending | pending | pending |
-| VIP Membership & Cars Pack | `FFFFFFFF` | yes | yes | db, effects | pending | pending | pending |
-| February Jalopnik Car Pack | `FFFFFFFF` | yes | yes | db, effects | pending | pending | pending |
-| LCE: Day1 DLC Pack | `00000001` | yes | yes | db, effects | pending | pending | pending |
-| March Meguiar's Car Pack | `FFFFFFFF` | yes | yes | db, effects | pending | pending | pending |
-| 2010 Ferrari 458 Italia | `00000001` | yes | yes | strings | pending | pending | pending |
-| April TopGear Car Pack | `00000001` | yes | yes | db, effects | pending | pending | pending |
-| 2012 Aston Martin Virage | `00000001` | yes | yes | strings | pending | pending | pending |
+| Pre-Order Car Pack | `FFFFFFFF` | yes | yes | db, effects | yes (player check 2026-10-08) | pending | pending |
+| Season Pass: 2006 Lamborghini Miura Concept | `00000001` | yes | yes | not yet | yes (player check 2026-10-08) | pending | pending |
+| VIP Membership & Cars Pack | `FFFFFFFF` | yes | yes | db, effects | yes (player check 2026-10-08) | pending | pending |
+| February Jalopnik Car Pack | `FFFFFFFF` | yes | yes | db, effects | yes (player check 2026-10-08) | pending | pending |
+| LCE: Day1 DLC Pack | `00000001` | yes | yes | db, effects | yes (player check 2026-10-08) | pending | pending |
+| March Meguiar's Car Pack | `FFFFFFFF` | yes | yes | db, effects | yes (player check 2026-10-08) | pending | pending |
+| 2010 Ferrari 458 Italia | `00000001` | yes | yes | strings | yes (player check 2026-10-08) | pending | pending |
+| April TopGear Car Pack | `00000001` | yes | yes | db, effects | yes (player check 2026-10-08) | pending | pending |
+| 2012 Aston Martin Virage | `00000001` | yes | yes | strings | yes (player check 2026-10-08) | pending | pending |
 | 2013 Ford Shelby GT500 - Rockstar Energy | `00000001` | yes | yes | not yet | **yes**, with the Rockstar livery (player check 2026-10-08) | pending | pending |
-| November Bondurant Car Pack | `FFFFFFFF` | yes | yes | db, effects | pending | pending | pending |
-| October Car Pack | `FFFFFFFF` | yes | yes | db, effects | pending | pending | pending |
-| December IGN Car Pack | `FFFFFFFF` | yes | yes | db, effects | pending | pending | pending |
-| 2011 Mercedes-Benz SLS AMG | `00000001` | yes | yes | strings | pending | pending | pending |
-| 2010 Volkswagen Golf R | `00000001` | yes | yes | strings | pending | pending | pending |
+| November Bondurant Car Pack | `FFFFFFFF` | yes | yes | db, effects | yes (player check 2026-10-08) | pending | pending |
+| October Car Pack | `FFFFFFFF` | yes | yes | db, effects | yes (player check 2026-10-08) | pending | pending |
+| December IGN Car Pack | `FFFFFFFF` | yes | yes | db, effects | yes (player check 2026-10-08) | pending | pending |
+| 2011 Mercedes-Benz SLS AMG | `00000001` | yes | yes | strings | yes (player check 2026-10-08) | pending | pending |
+| 2010 Volkswagen Golf R | `00000001` | yes | yes | strings | yes (player check 2026-10-08) | pending | pending |
 | 2013 Ford Mustang Boss 302 - Pizza Hut Edition | `00000000` | yes | yes | not yet | **no**: the package's own licence table grants no bits, so offer 2800 is unowned (player check 2026-10-08: only the base Boss 302 appears) | — | — |
-| Honda Challenge Car Pack | `00000001` | yes | yes | db, effects | pending | pending | pending |
-| January Recaro Car Pack | `FFFFFFFF` | yes | yes | db, effects | pending | pending | pending |
-| 2010 Nissan 370Z | `00000001` | yes | yes | strings | pending | pending | pending |
-| 1000 Club Expansion Pack | `00000001` | yes | yes | db, effects | pending | pending | pending |
+| Honda Challenge Car Pack | `00000001` | yes | yes | db, effects | yes (player check 2026-10-08) | pending | pending |
+| January Recaro Car Pack | `FFFFFFFF` | yes | yes | db, effects | yes (player check 2026-10-08) | pending | pending |
+| 2010 Nissan 370Z | `00000001` | yes | yes | strings | yes (player check 2026-10-08) | pending | pending |
+| 1000 Club Expansion Pack | `00000001` | yes | yes | db, effects | yes (player check 2026-10-08) | pending | pending |
 | Rally Expansion Pack | — | **no**: supplied copies were the rejected variant (`AA7BD510…`, twice) and then a truncated file (`53037F21…`, 1,082,493,336 bytes, not block-aligned; the SDK extractor crashes on it) | — | — | — | — | — |
 
 Notes:
