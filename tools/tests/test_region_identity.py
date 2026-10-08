@@ -204,6 +204,35 @@ class DefaultGameRootTests(unittest.TestCase):
         self.assertEqual(self.resolve("not json"), ".local/game/base")
 
 
+@unittest.skipUnless(shutil.which("powershell"), "Windows PowerShell required")
+class GameLanguageTests(unittest.TestCase):
+    def run_language(self, state: Path, *args: str) -> dict:
+        result = subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+                                 str(ROOT / "tools/set-game-language.ps1"), "-StateRoot", str(state), *args],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return json.loads(result.stdout.strip().splitlines()[-1])
+
+    def test_language_choice_sets_and_clears_the_console_language(self):
+        with tempfile.TemporaryDirectory(prefix="pinyon-language-") as temporary:
+            state = Path(temporary)
+            config = state / "config/pinyon_shift.toml"
+            config.parent.mkdir(parents=True)
+            config.write_text("schema_version = 28\nresolution_scale = 2\n")
+            self.assertEqual(self.run_language(state, "-Language", "German")["language"], "German")
+            text = config.read_text()
+            self.assertIn("user_language = 3", text)
+            self.assertIn("resolution_scale = 2", text)
+            self.assertEqual(self.run_language(state)["language"], "German")
+            self.assertEqual(self.run_language(state, "-Language", "Spanish (Mexico)")["language"], "Spanish (Mexico)")
+            self.assertIn("user_country = 71", config.read_text())
+            self.assertEqual(self.run_language(state, "-Language", "Spanish")["language"], "Spanish")
+            self.assertNotIn("user_country", config.read_text())
+            self.assertEqual(self.run_language(state, "-Language", "Console default")["language"], "Console default")
+            self.assertNotIn("user_language", config.read_text())
+            self.assertTrue(list((state / "config/backups").glob("pinyon_shift-*.toml")))
+
+
 PENDING_BUILD_EXIT = 3
 
 

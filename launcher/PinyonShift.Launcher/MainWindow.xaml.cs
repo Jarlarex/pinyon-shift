@@ -1219,6 +1219,7 @@ public partial class MainWindow : Window
         {
             GraphicsStatusText.Text = $"Settings could not be loaded: {ex.Message}";
         }
+        await LoadLanguageAsync();
         await ShowHardwareCheckAsync();
     }
 
@@ -1618,9 +1619,68 @@ public partial class MainWindow : Window
 
     private const string InGameHint = "Everything else is in the game: press F6 while playing.";
 
+    // "Console default" plus the voice languages of the disc that was set up (supported-dumps.json).
+    internal static List<string> GameLanguages(string repositoryRoot)
+    {
+        var languages = new List<string> { "Console default" };
+        try
+        {
+            using var state = JsonDocument.Parse(File.ReadAllText(Path.Combine(repositoryRoot, ".local", "setup-state.json")));
+            var dumpId = state.RootElement.GetProperty("dump_id").GetString();
+            using var dumps = JsonDocument.Parse(File.ReadAllText(Path.Combine(repositoryRoot, "config", "supported-dumps.json")));
+            foreach (var dump in dumps.RootElement.GetProperty("dumps").EnumerateArray())
+                if (dump.GetProperty("id").GetString() == dumpId && dump.TryGetProperty("voice_languages", out var voices))
+                    languages.AddRange(voices.EnumerateArray().Select(voice => voice.GetString()!));
+        }
+        catch (Exception ex) when (ex is IOException or JsonException or KeyNotFoundException or InvalidOperationException) { }
+        if (languages.Count == 1) languages.Add("English");
+        return languages;
+    }
+
+    private string? _loadedLanguage;
+
+    private async Task LoadLanguageAsync()
+    {
+        if (_repositoryRoot is null || _stateRoot is null) return;
+        LanguageComboBox.ItemsSource = null;
+        var languages = GameLanguages(_repositoryRoot);
+        try { _loadedLanguage = await RunLanguageToolAsync(null); }
+        catch (Exception ex) { _loadedLanguage = null; AppendLog($"Game language unavailable: {ex.Message}"); }
+        if (_loadedLanguage is not null && !languages.Contains(_loadedLanguage)) languages.Add(_loadedLanguage);
+        LanguageComboBox.ItemsSource = languages;
+        LanguageComboBox.SelectedItem = _loadedLanguage ?? "Console default";
+    }
+
+    private async Task<string> RunLanguageToolAsync(string? language)
+    {
+        var start = new ProcessStartInfo
+        {
+            FileName = PowerShellExecutable(), WorkingDirectory = _repositoryRoot!,
+            UseShellExecute = false, CreateNoWindow = true,
+            RedirectStandardOutput = true, RedirectStandardError = true
+        };
+        foreach (var argument in new[] { "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+            Path.Combine(_repositoryRoot!, "tools", "set-game-language.ps1"), "-StateRoot", _stateRoot! })
+            start.ArgumentList.Add(argument);
+        if (language is not null) { start.ArgumentList.Add("-Language"); start.ArgumentList.Add(language); }
+        using var process = Process.Start(start) ?? throw new InvalidOperationException("Windows could not start the language tool.");
+        var output = process.StandardOutput.ReadToEndAsync();
+        var error = process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync();
+        if (process.ExitCode != 0) throw new InvalidOperationException((await error).Trim());
+        var stdout = (await output).Trim();
+        using var result = JsonDocument.Parse(stdout[(stdout.LastIndexOf('\n') + 1)..]);
+        return result.RootElement.GetProperty("language").GetString() ?? "Console default";
+    }
+
     private async void SaveGraphicsButton_Click(object sender, RoutedEventArgs e)
     {
         if (!await ChangeGraphicsSettingsAsync("Apply", "Saved. Applies at the next start.")) return;
+        if (LanguageComboBox.SelectedItem is string language && language != _loadedLanguage && !language.StartsWith("Language "))
+        {
+            try { _loadedLanguage = await RunLanguageToolAsync(language); }
+            catch (Exception ex) { GraphicsStatusText.Text = $"The game language was not saved: {ex.Message}"; return; }
+        }
         // Refresh the displayed resolution after saving.
         if (_gameExecutable is not null && !_busy) DetectExistingBuild();
         CloseGraphicsButton_Click(sender, e);

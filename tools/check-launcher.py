@@ -276,6 +276,17 @@ class Check {
             "EU v4 setup state not recognized");
         Require(Setup("{\"build\":\"base\",\"game_root\":\"../../outside\"}") == (false, ".local/game/base"),
             "Setup state game root escapes .local/game");
+        // The language choice offers the voices of the disc that was set up.
+        var gameLanguages = typeof(MainWindow).GetMethod("GameLanguages", BindingFlags.Static | BindingFlags.NonPublic)!;
+        Directory.CreateDirectory(Path.Combine(setupRoot, "config"));
+        File.WriteAllText(Path.Combine(setupRoot, "config", "supported-dumps.json"),
+            "{\"dumps\":[{\"id\":\"eur\",\"voice_languages\":[\"English\",\"German\",\"Dutch\"]}]}");
+        File.WriteAllText(Path.Combine(setupRoot, ".local", "setup-state.json"), "{\"dump_id\":\"eur\"}");
+        var offered = string.Join(",", (System.Collections.Generic.List<string>)gameLanguages.Invoke(null, [setupRoot])!);
+        Require(offered == "Console default,English,German,Dutch", $"Game languages: {offered}");
+        File.Delete(Path.Combine(setupRoot, ".local", "setup-state.json"));
+        offered = string.Join(",", (System.Collections.Generic.List<string>)gameLanguages.Invoke(null, [setupRoot])!);
+        Require(offered == "Console default,English", $"Game languages without setup: {offered}");
         Directory.Delete(setupRoot, true);
 
         // A recognized disc whose build is not supported yet is verified, not failed.
