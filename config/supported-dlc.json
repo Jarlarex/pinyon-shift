@@ -411,6 +411,23 @@
         }
       ],
       "rejected": []
+    },
+    {
+      "package_id": "D4888FE9189BEF249567245E784F876794F0BDC04D",
+      "content_id": "0390E8868FD0F18657144FA6F6B1329D980E8D02",
+      "display_name": "2013 Ford Mustang Boss 302  - Pizza Hut Edition",
+      "status": "import_verified_gameplay_pending",
+      "payload_sha256": "60FA6CE23469D78F248E6424FF1DF7F1A8C987E63FABAA57720D0D6DBAF5E374",
+      "file_count": 8,
+      "expanded_size": 14478848,
+      "accepted": [
+        {
+          "size": 14639104,
+          "sha256": "C19665C453830AD41D8D6A970C981856AF4BF3E994BFE31EDC554F885D62F811",
+          "license_mask": "00000000"
+        }
+      ],
+      "rejected": []
     }
   ]
 }

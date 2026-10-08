@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)] [ValidateSet('list', 'import', 'enable', 'disable')] [string]$Action,
+    [Parameter(Mandatory)] [ValidateSet('list', 'import', 'install-folder', 'enable', 'disable')] [string]$Action,
     [Parameter(Mandatory)] [string]$StateRoot,
     [string]$InputPath,
     [string]$PackageId

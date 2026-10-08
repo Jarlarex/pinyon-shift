@@ -413,17 +413,68 @@ def set_enabled(state: Path, id: str, enabled: bool) -> list[dict]:
     return list_content(state)
 
 
+EXTRACTOR_NAME = "pinyon_shift_fh1_archive_extract.exe"
+# The base game build, the v4 build, then the small tools build an EU-only setup makes first.
+EXTRACTOR_BUILDS = ("out/build/win-amd64-release", "out/build/win-amd64-v4", "out/build/title-update-tools")
+
+
+def default_extractor(root: Path = ROOT) -> Path:
+    candidates = [root / build / EXTRACTOR_NAME for build in EXTRACTOR_BUILDS]
+    return next((path for path in candidates if path.is_file()), candidates[0])
+
+
+def install_folder(source: Path, state: Path, extractor: Path) -> dict:
+    """Import every owned package found in a folder, one file at a time, and enable them all.
+
+    A file that is not a verified FH1 Marketplace package (a disc image, a title
+    update, a rejected or unknown package) is reported with its reason and does
+    not stop the others. The source files are only read."""
+    def records() -> dict[str, str]:
+        metadata = long_path(state) / "dlc"
+        return {path.stem: path.read_text(encoding="utf-8") for path in metadata.glob("*.json")} \
+            if metadata.is_dir() else {}
+
+    rows = []
+    for path in sorted(path for path in source.rglob("*") if path.is_file() and not path.is_symlink()):
+        with path.open("rb") as stream:
+            magic = stream.read(4)
+        if magic not in MAGIC and not zipfile.is_zipfile(path):
+            rows.append(dict(file=str(path), status="skipped", reason="not a DLC package"))
+            continue
+        before = records()
+        try:
+            import_content(path, state, extractor)
+        except (ValueError, zipfile.BadZipFile) as error:
+            rows.append(dict(file=str(path), status="skipped", reason=str(error)))
+            continue
+        rows.append(dict(file=str(path), status="imported" if records() != before else "already installed"))
+    for record in list_content(state):
+        if not record.get("enabled"):
+            try:
+                set_enabled(state, record["package_id"], True)
+            except ValueError as error:
+                rows.append(dict(file=record["package_id"], status="not enabled", reason=str(error)))
+    return dict(files=rows, packages=list_content(state))
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("list", "import", "enable", "disable"))
+    parser.add_argument("action", choices=("list", "import", "install-folder", "enable", "disable"))
     parser.add_argument("--state-root", type=Path, required=True)
     parser.add_argument("--source", type=Path)
     parser.add_argument("--package-id")
     parser.add_argument("--game-root", type=Path, default=ROOT / ".local/game/base")
-    parser.add_argument("--extractor", type=Path, default=ROOT / "out/build/win-amd64-release/pinyon_shift_fh1_archive_extract.exe")
+    parser.add_argument("--extractor", type=Path,
+                        help=f"archive extractor (default: the first of {', '.join(EXTRACTOR_BUILDS)})")
     args = parser.parse_args()
+    args.extractor = args.extractor or default_extractor()
     try:
         state = args.state_root.resolve()
+        if args.action == "install-folder":
+            if args.source is None or not args.source.is_dir():
+                raise ValueError("choose the folder that holds your DLC")
+            print(json.dumps(install_folder(args.source.resolve(), state, args.extractor.resolve())))
+            return 0
         if args.action == "list":
             records = list_content(state)
         elif args.action == "import":
