@@ -10,7 +10,8 @@ a playtest in the Autoshow and events and are pending.
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | Pre-Order Car Pack | `FFFFFFFF` | yes | yes | db, effects | yes (player check 2026-10-08) | pending | pending |
 | Season Pass: 2006 Lamborghini Miura Concept | `00000001` | yes | yes | not yet | yes (player check 2026-10-08) | pending | pending |
-| VIP Membership & Cars Pack | `FFFFFFFF` | yes | yes | db, effects | yes (player check 2026-10-08) | pending | pending |
+| VIP Membership & Cars Pack (`210BB005…`, offer 2100) | `FFFFFFFF` | yes | yes | db, effects | yes (player check 2026-10-08) | pending | pending |
+| VIP Membership & Cars Pack (`A5B171B8…`, offer 1006) | `00000001` | yes (2026-10-08, later supply) | pending | pending | pending | pending | pending |
 | February Jalopnik Car Pack | `FFFFFFFF` | yes | yes | db, effects | yes (player check 2026-10-08) | pending | pending |
 | LCE: Day1 DLC Pack | `00000001` | yes | yes | db, effects | yes (player check 2026-10-08) | pending | pending |
 | March Meguiar's Car Pack | `FFFFFFFF` | yes | yes | db, effects | yes (player check 2026-10-08) | pending | pending |
@@ -36,6 +37,8 @@ Notes:
 - "Not yet" means the package mounted but no file was opened before the route ended; the Autoshow check decides.
   The Mustang's licence mask is `00000000` as supplied; it is recorded, never changed.
 
+- Later supplies (2026-10-08): two more Mustang Pizza Hut copies were byte-identical to the first (no licence), and a
+  multi-pack archive held the same rejected Rally variant; its second VIP package was new and is installed.
 - The Challenger SRT8 392 Rockstar livery belongs to a package that is not among the supplied files; only the
   base Challenger appears, as expected.
 
