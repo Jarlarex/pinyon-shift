@@ -197,6 +197,10 @@ class SetupRegionTests(unittest.TestCase):
                 (root / f"tools/{name}.ps1").write_text(
                     "param([switch]$JsonEvents, [string]$GameRoot)\n"
                     "Add-Content -LiteralPath (Join-Path $PSScriptRoot '../stages.txt') '" + name + "'\n")
+            (root / "tools/setup-title-update.ps1").write_text(
+                "param([string]$StateRoot, [string]$MediaId, [string]$Region, [switch]$JsonEvents)\n"
+                "Add-Content -LiteralPath (Join-Path $PSScriptRoot '../stages.txt') "
+                "\"title-update $MediaId $Region $(Split-Path $StateRoot -Leaf)\"\n")
             usa = root / ".local/game/base"
             usa.mkdir(parents=True)
             (usa / "default.xex").write_bytes(b"usa executable")
@@ -211,7 +215,8 @@ class SetupRegionTests(unittest.TestCase):
             for name, data in self.CONTENTS.items():
                 self.assertEqual((eur / name).read_bytes(), data)
             self.assertEqual((usa / "default.xex").read_bytes(), b"usa executable")
-            self.assertEqual((root / "stages.txt").read_text().splitlines(), ["provision-toolchain", "prepare-rexglue"])
+            self.assertEqual((root / "stages.txt").read_text().splitlines(),
+                             ["provision-toolchain", "prepare-rexglue", "title-update 4000D145 EUR preview"])
             self.assertEqual((root / ".local/setup-state.json").read_text(), usa_state)
             state = json.loads((root / ".local/setup-pending-build.json").read_text())
             self.assertEqual(state["result"], "extracted_pending_build")

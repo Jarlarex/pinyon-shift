@@ -4,7 +4,9 @@ param(
     [Parameter(Mandatory, ParameterSetName = 'Extracted')] [Alias('GamePath', 'GameDir')]
     [ValidateNotNullOrEmpty()] [string]$ExtractedPath,
     [switch]$JsonEvents,
-    [switch]$VerifyOnly
+    [switch]$VerifyOnly,
+    # Where the title update is installed; the launcher passes its own state root.
+    [string]$StateRoot
 )
 
 Set-StrictMode -Version Latest
@@ -128,6 +130,15 @@ try {
         }
     }
     Write-PinyonEvent extract 58 'Local game files are verified and ready.' -JsonEvents:$JsonEvents
+
+    # The pinned title update for this disc, when the disc is one of its verified bases.
+    # Failures fall back to the base disc inside the step, so they never stop setup.
+    if ($verification.PSObject.Properties['media_id'] -and $verification.media_id) {
+        $titleUpdateState = if ($StateRoot) { [IO.Path]::GetFullPath($StateRoot) } else {
+            Resolve-PinyonLocalPath -RelativePath '.local/preview' }
+        & (Join-Path $PSScriptRoot 'setup-title-update.ps1') -StateRoot $titleUpdateState `
+            -MediaId $verification.media_id -Region $region -JsonEvents:$JsonEvents | Out-Host
+    }
 
     if ($buildSupport -ne 'supported') {
         # A recognized disc whose port is unfinished: keep its verified files and stop before

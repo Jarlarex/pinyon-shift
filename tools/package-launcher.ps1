@@ -67,7 +67,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Launcher publish failed.' }
 $include = @(
     'CMakeLists.txt', 'CMakePresets.json', 'LICENSE', 'README.md', 'THIRD_PARTY_NOTICES.md',
     'cmake', 'config/gamecontrollerdb.txt', 'config/release.json', 'config/release-toolchain.json', 'config/supported-dumps.json',
-    'config/supported-extracted-ms-2505.json', 'tools/verify-extracted-game.ps1', 'docs/EXTRACTED_GAME_INPUT.md',
+    'config/supported-extracted-ms-2505.json', 'config/supported-extracted-eur-4000d145.json',
+    'tools/verify-extracted-game.ps1', 'docs/EXTRACTED_GAME_INPUT.md',
     'config/supported-dlc.json', 'tools/manage-fh1-dlc.py', 'tools/manage-dlc.ps1', 'tools/prepare-fh1-rally.py', 'tools/patch-fh1-archive.py',
     'config/rexglue', 'include', 'mods_src', 'src', 'tests/config', 'tests/native_renderer',
     'tests/save', 'tests/ui', 'tests/dlc', 'tests/mod',
@@ -87,7 +88,10 @@ $include = @(
     'tools/verify-codegen-log.ps1', 'tools/verify-game.ps1',
     # The optional v4 title update (docs/TITLE_UPDATE_V4_BACKLOG.md TU-2).
     'config/supported-title-updates.json', 'tools/verify-fh1-title-update.py', 'tools/title-update-profile.py',
-    'tools/manage-title-update.ps1', 'tools/build-v4.ps1', 'tools/verify-codegen-log.py'
+    'tools/manage-title-update.ps1', 'tools/build-v4.ps1', 'tools/verify-codegen-log.py',
+    # Its automatic download during setup.
+    'config/title-update-sources.json', 'tools/fetch-title-update.py', 'tools/setup-title-update.ps1',
+    'tools/build-title-update-tools.ps1'
 )
 foreach ($relative in $include) {
     $source = Join-Path $root $relative

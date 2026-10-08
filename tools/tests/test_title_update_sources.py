@@ -260,6 +260,84 @@ class FetchTests(unittest.TestCase):
         self.assertEqual(written, {f"downloads/title-update/{self.UPDATE}.pkg"})
 
 
+import shutil
+import subprocess
+import sys
+
+
+@unittest.skipUnless(shutil.which("powershell"), "Windows PowerShell required")
+class SetupTitleUpdateTests(unittest.TestCase):
+    """tools/setup-title-update.ps1 with stubbed fetch, manage and build steps."""
+
+    def run_step(self, media_id: str, region: str, *, fetch_status: str = "downloaded", profiles: str = "{}",
+                 extractor: bool = True):
+        temporary = tempfile.TemporaryDirectory(prefix="pinyon-tu-setup-")
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        (root / "tools").mkdir()
+        (root / "config").mkdir()
+        for name in ("setup-title-update.ps1", "release-common.ps1"):
+            shutil.copyfile(ROOT / "tools" / name, root / "tools" / name)
+        shutil.copyfile(ROOT / "config/release-toolchain.json", root / "config/release-toolchain.json")
+        bases = [dict(media_id="4000D145"), dict(media_id="2DC7007B")]
+        (root / "config/supported-title-updates.json").write_text(json.dumps(dict(updates=[dict(verified_bases=bases)])))
+        log = root / "calls.txt"
+        imported = "true" if fetch_status != "fallback" else "false"
+        (root / "tools/fetch-title-update.py").write_text(
+            "import json, sys\n"
+            f"open(r'{log}', 'a').write('fetch ' + ' '.join(sys.argv[1:]) + '\\n')\n"
+            "print('::pinyon::' + json.dumps(dict(stage='tools', percent=33, message='plan')))\n"
+            f"print(json.dumps(dict(status='{fetch_status}', imported={imported.title()})))\n")
+        (root / "tools/manage-title-update.ps1").write_text(
+            "param([string]$Action, [string]$StateRoot)\n"
+            f"Add-Content -LiteralPath '{log}' \"manage $Action\"\n"
+            f"'{{\"profiles\": {profiles}}}'\n")
+        (root / "tools/build-title-update-tools.ps1").write_text(
+            f"param([switch]$JsonEvents)\nAdd-Content -LiteralPath '{log}' 'build'\n")
+        if extractor:
+            tools = root / "out/build/title-update-tools"
+            tools.mkdir(parents=True)
+            (tools / "pinyon_shift_fh1_archive_extract.exe").write_bytes(b"exe")
+        result = subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+                                 str(root / "tools/setup-title-update.ps1"), "-StateRoot", str(root / "state"),
+                                 "-MediaId", media_id, "-Region", region, "-Python", sys.executable,
+                                 "-JsonEvents"], capture_output=True, text=True)
+        calls = log.read_text().splitlines() if log.exists() else []
+        return result, calls
+
+    def test_eu_fresh_profile_downloads_imports_and_enables_v4(self):
+        result, calls = self.run_step("4000D145", "EUR")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(calls[0].startswith("fetch --state-root"))
+        self.assertIn("--json-events", calls[0])
+        self.assertEqual(calls[1:], ["manage status", "manage enable"])
+        self.assertIn("::pinyon::", result.stdout)
+
+    def test_eu_with_base_saves_leaves_the_choice_to_the_player(self):
+        result, calls = self.run_step("4000D145", "EUR", profiles='{"E0000ABCD": "base"}')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("manage enable", calls)
+        self.assertIn("existing", result.stdout)
+
+    def test_usa_downloads_but_keeps_the_base_build(self):
+        result, calls = self.run_step("2DC7007B", "USA")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(calls), 1)
+
+    def test_fallback_and_unknown_discs_never_fail_setup(self):
+        result, calls = self.run_step("4000D145", "EUR", fetch_status="fallback")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("manage enable", calls)
+        result, calls = self.run_step("12345678", "EUR")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(calls, [])
+
+    def test_missing_extractor_is_built_first(self):
+        result, calls = self.run_step("4000D145", "EUR", extractor=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(calls[0], "build")
+
+
 class SourceListTests(unittest.TestCase):
     def test_sources_name_known_updates_with_http_urls_and_no_hashes(self):
         sources = load("title-update-sources.json")
