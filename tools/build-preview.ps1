@@ -67,8 +67,8 @@ if ($gameXexInfo.Length -ne [int64]$supportedXex.size_bytes -or
 $guestPatchPath = Join-Path $root 'config/rexglue/analysis/fh1-post-processing.toml'
 $guestPatchSetSha256 = (Get-FileHash -LiteralPath $guestPatchPath -Algorithm SHA256).Hash
 
-[void](Invoke-PinyonCodeGeneratorBuild -Environment $environment -Parallel $Parallel -LogDirectory $logs `
-    -BuildTrees @((Join-Path $root "out/build/$previewPreset")) -JsonEvents:$JsonEvents)
+Invoke-PinyonCodeGeneratorBuild -Environment $environment -Parallel $Parallel -LogDirectory $logs `
+    -BuildTrees @((Join-Path $root "out/build/$previewPreset")) -JsonEvents:$JsonEvents
 
 Write-PinyonEvent build 72 'Translating the verified game code locally.' -JsonEvents:$JsonEvents
 $generatedTrees = @('default', 'speech', 'xmedia')

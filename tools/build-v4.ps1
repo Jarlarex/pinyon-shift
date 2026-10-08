@@ -47,8 +47,26 @@ $logs = Resolve-PinyonLocalPath -RelativePath '.local/logs'
 if ($Parallel -eq 0) { $Parallel = Get-PinyonBuildJobCount }
 # A disc built only with its update (the EU disc) never ran build-preview.ps1, which used to
 # be the only place the generator was built.
-[void](Invoke-PinyonCodeGeneratorBuild -Environment $environment -Parallel $Parallel -LogDirectory $logs `
-    -BuildTrees @((Join-Path $root 'out/build/win-amd64-v4')))
+Invoke-PinyonCodeGeneratorBuild -Environment $environment -Parallel $Parallel -LogDirectory $logs `
+    -BuildTrees @((Join-Path $root 'out/build/win-amd64-v4'))
+$rexglueExe = Join-Path (Resolve-PinyonRexGlueRoot) 'out/win-amd64/Release/rexglue.exe'
+# Configuring needs the generated trees; the build regenerates them when inputs change.
+# Generate them once here, as build-preview.ps1 does for the base trees.
+$generated = Resolve-PinyonLocalPath -RelativePath '.local/generated-v4'
+$missing = @('default', 'speech', 'xmedia' | Where-Object {
+    -not (Test-Path -LiteralPath (Join-Path $generated "$_/sources.cmake") -PathType Leaf) })
+if ($missing.Count -gt 0) {
+    $codegenArguments = @('--log-level', 'info', '--log-file', (Join-Path $logs 'codegen-v4.log'),
+        'codegen', (Join-Path $root 'config/rexglue/pinyon_shift_v4_manifest.toml'), '--xex_apply_patches=true')
+    $codegenConsoleLog = Join-Path $logs 'codegen-v4-console.log'
+    Invoke-PinyonLoggedCommand -FilePath $rexglueExe -Arguments $codegenArguments -LogPath $codegenConsoleLog `
+        -Utf8Output | Out-Host
+    if ($LASTEXITCODE -ne 0) {
+        throw (New-PinyonCommandFailure -FailureMessage 'v4 code generation failed.' -Step 'Translate the v4 game code' `
+            -LogPath $codegenConsoleLog -ExitCode $LASTEXITCODE `
+            -CommandLine (Format-PinyonCommandLine -FilePath $rexglueExe -Arguments $codegenArguments))
+    }
+}
 Invoke-PinyonBuildCommand $environment.CMake @('--preset', 'win-amd64-v4',
     "-DPYTHON_EXECUTABLE=$(Get-PinyonPython)") `
     (Join-Path $logs 'v4-configure.log') 'v4 configuration failed.' -Step 'Configure the v4 build'

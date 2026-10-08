@@ -39,8 +39,10 @@ function Resolve-PinyonLocalPath {
 }
 
 # Builds the pinned standalone ReXGlue generator that every game build
-# configures against (cmake/PinyonShiftRexGlue.cmake), and returns its path.
-# Shared by build-preview.ps1 and build-v4.ps1; a current build is a no-op.
+# configures against (cmake/PinyonShiftRexGlue.cmake), at
+# <ShiftGlue>/out/win-amd64/Release/rexglue.exe. Its progress events and build
+# output pass through like the inline steps they replace, so callers must not
+# capture or discard its output. Shared by build-preview.ps1 and build-v4.ps1.
 function Invoke-PinyonCodeGeneratorBuild {
     param(
         [Parameter(Mandatory)] $Environment,
@@ -82,7 +84,6 @@ function Invoke-PinyonCodeGeneratorBuild {
     if (-not (Test-Path -LiteralPath $rexglueExe -PathType Leaf)) {
         throw "The ReXGlue code generator was not produced: $rexglueExe"
     }
-    $rexglueExe
 }
 
 # The extracted disc of the last completed setup (setup-state.json game_root),
