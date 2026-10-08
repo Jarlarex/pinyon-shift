@@ -31,6 +31,15 @@ adapter and artifact tools pick dumps by capability instead of by id or position
 
 ## 2. Recompilation inputs (code addresses)
 
+**EU + v4 done (`eu-v4`, 2026-10-08); EU without the update open
+(`eu-image-diff`).** The EU disc is built only with its title update. The
+patched images equal the USA v4 images, so the existing `analysis-v4/` and
+`fh1_v4_addresses.inc` apply unchanged, and sections 2–4 matter only for an EU
+build without the update. Real run: setup builds v4 from
+`.local/game/eur-base`; the fresh-profile smoke route reaches the title screen
+in English ("PRESS START") and German ("START DRÜCKEN") on an RTX 5060 laptop
+GPU.
+
 | Location | Assumption | EU work |
 | --- | --- | --- |
 | `config/rexglue/pinyon_shift_manifest.toml` | Paths `.local/game/base/*.xex`; one module set | Per-region game root / generated dirs (as v4 does) |

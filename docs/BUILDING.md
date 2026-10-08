@@ -42,9 +42,13 @@ break VsDevCmd. The launcher's original TEMP/TMP directories are preserved.
 
 Each recognized disc revision is extracted into its own folder: the USA disc
 into `.local/game/base`, the European disc (media `4000D145`) into
-`.local/game/eur-base`. The European disc is verified and extracted but cannot
-be built yet; setup then stops with exit code 3, records the result in
-`.local/setup-pending-build.json` and leaves any USA build untouched.
+`.local/game/eur-base`. The European disc is built only with its title update
+(`build_support: v4`): after the update is installed, setup runs
+`tools/build-v4.ps1` from that folder, and the launcher always starts the v4
+build. Without the update setup stops with exit code 3 and asks for it; a disc
+whose build is not supported at all also stops with exit code 3 and records
+`.local/setup-pending-build.json`. Neither touches a USA build. The game
+language is chosen in the launcher's graphics panel from the voices on the disc.
 
 The original ISO is opened read-only and is never changed. Setup can be safely
 run again after a failure; completed downloads and extraction are reused after
