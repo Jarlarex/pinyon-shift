@@ -6,7 +6,10 @@ param(
     [switch]$JsonEvents,
     [switch]$VerifyOnly,
     # Where the title update is installed; the launcher passes its own state root.
-    [string]$StateRoot
+    [string]$StateRoot,
+    # A folder with the player's own DLC packages, installed and enabled after the build.
+    # Defaults to a 'gamefiles' folder beside the repository when one exists.
+    [string]$DlcPath
 )
 
 Set-StrictMode -Version Latest
@@ -181,6 +184,27 @@ try {
     } else {
         & (Join-Path $PSScriptRoot 'build-preview.ps1') -JsonEvents:$JsonEvents | Out-Host
         & (Join-Path $PSScriptRoot 'prepare-fh1-shaders.ps1') -GameRoot $gameRoot -JsonEvents:$JsonEvents | Out-Host
+    }
+    # The player's own DLC: every verified package is installed and enabled; anything else is
+    # reported. A problem here never fails setup, since the game plays without DLC.
+    $dlcFolder = if ($DlcPath) { [IO.Path]::GetFullPath($DlcPath) } else { Join-Path (Split-Path $root -Parent) 'gamefiles' }
+    if (Test-Path -LiteralPath $dlcFolder -PathType Container) {
+        Write-PinyonEvent play 97 "Installing your DLC from $dlcFolder." -JsonEvents:$JsonEvents
+        try {
+            $installed = (& (Join-Path $PSScriptRoot 'manage-dlc.ps1') -Action install-folder -StateRoot $titleUpdateState `
+                -InputPath $dlcFolder | Select-Object -Last 1) | ConvertFrom-Json
+            $new = @($installed.files | Where-Object status -eq 'imported').Count
+            $kept = @($installed.files | Where-Object status -eq 'already installed').Count
+            $skipped = @($installed.files | Where-Object { $_.status -notin 'imported', 'already installed' })
+            Write-PinyonEvent play 98 ("Installed $new DLC package(s); $kept already installed; " +
+                "$($skipped.Count) file(s) skipped.") -JsonEvents:$JsonEvents
+            foreach ($file in $skipped) {
+                [Console]::Out.WriteLine("DLC skipped: $(Split-Path $file.file -Leaf): $($file.reason)")
+            }
+        }
+        catch {
+            Write-PinyonEvent play 98 "Your DLC was not installed: $($_.Exception.Message)" -JsonEvents:$JsonEvents
+        }
     }
     $state = [ordered]@{
         schema_version = 1

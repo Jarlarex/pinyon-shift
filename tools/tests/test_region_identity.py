@@ -323,6 +323,23 @@ class SetupRegionTests(unittest.TestCase):
             self.assertEqual(state["game_root"], ".local/game/eur-base")
             self.assertEqual(state["result"], "ready")
 
+    def test_setup_installs_owned_dlc_from_the_given_folder(self):
+        with tempfile.TemporaryDirectory(prefix="pinyon-region-") as temporary:
+            root = Path(temporary)
+            command = self.v4_fixture(root, update_installed=True)
+            dlc_folder = root / "my dlc"
+            dlc_folder.mkdir()
+            (root / "tools/manage-dlc.ps1").write_text(
+                "param([string]$Action, [string]$StateRoot, [string]$InputPath)\n"
+                "Add-Content -LiteralPath (Join-Path $PSScriptRoot '../stages.txt') "
+                "\"dlc $Action $(Split-Path $InputPath -Leaf) $(Split-Path $StateRoot -Leaf)\"\n"
+                "'{\"files\": [{\"status\": \"imported\"}, {\"status\": \"skipped\", \"reason\": \"x\"}], \"packages\": []}'\n")
+            result = run_script(*command, "-DlcPath", str(dlc_folder))
+            self.assertEqual(result.returncode, 0, result.stdout.decode(errors="replace"))
+            stages = (root / "stages.txt").read_text().splitlines()
+            self.assertEqual(stages[-1], "dlc install-folder my dlc preview")
+            self.assertIn(b"1 DLC package", result.stdout)
+
     def test_v4_region_without_its_title_update_stops_and_says_why(self):
         with tempfile.TemporaryDirectory(prefix="pinyon-region-") as temporary:
             root = Path(temporary)
