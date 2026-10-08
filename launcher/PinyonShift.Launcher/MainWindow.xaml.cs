@@ -308,6 +308,12 @@ public partial class MainWindow : Window
             startInfo.ArgumentList.Add(Directory.Exists(IsoPathTextBox.Text) ? "-ExtractedPath" : "-IsoPath");
             startInfo.ArgumentList.Add(IsoPathTextBox.Text);
             startInfo.ArgumentList.Add("-JsonEvents");
+            // The title update is installed where this launcher's game reads it.
+            if (_stateRoot is not null)
+            {
+                startInfo.ArgumentList.Add("-StateRoot");
+                startInfo.ArgumentList.Add(_stateRoot);
+            }
 
             using var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
             process.OutputDataReceived += (_, args) => Dispatcher.Invoke(() => HandleOutput(args.Data));
@@ -1242,6 +1248,52 @@ public partial class MainWindow : Window
         ShowPanel(View.Dlc);
         await ChangeDlcAsync("list", success: "Changes apply the next time you start the game.");
         await RefreshTitleUpdateAsync();
+        // Setup normally installs it; otherwise try the pinned download once per session.
+        if (_titleUpdate is { Installed: false } && !_titleUpdateDownloadTried) await DownloadTitleUpdateAsync();
+    }
+
+    private bool _titleUpdateDownloadTried;
+
+    private async void DownloadTitleUpdateButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_busy) await DownloadTitleUpdateAsync();
+    }
+
+    private async Task DownloadTitleUpdateAsync()
+    {
+        if (_repositoryRoot is null || _stateRoot is null) return;
+        _titleUpdateDownloadTried = true;
+        await ChangeTitleUpdateAsync("download", null,
+            "Title update downloaded and verified against your disc. Choose Use v4 to play it.",
+            DescribeTitleUpdateDownload(_repositoryRoot, _stateRoot));
+        DownloadTitleUpdateButton.Content = "Retry download";
+    }
+
+    // What the download will fetch, shown before the first byte: size, hosts and hash come from
+    // the pinned config files, never from a source.
+    internal static string DescribeTitleUpdateDownload(string repositoryRoot, string stateRoot)
+    {
+        using var updates = JsonDocument.Parse(File.ReadAllText(Path.Combine(repositoryRoot, "config", "supported-title-updates.json")));
+        var update = updates.RootElement.GetProperty("updates")[0];
+        var package = update.GetProperty("package");
+        var size = package.GetProperty("size_bytes").GetInt64() / 1048576.0;
+        var sha256 = package.GetProperty("sha256").GetString() ?? "";
+        var hosts = new List<string>();
+        var sourcesPath = Path.Combine(repositoryRoot, "config", "title-update-sources.json");
+        if (File.Exists(sourcesPath))
+        {
+            using var sources = JsonDocument.Parse(File.ReadAllText(sourcesPath));
+            if (sources.RootElement.GetProperty("sources").TryGetProperty(update.GetProperty("id").GetString()!, out var list))
+                foreach (var source in list.EnumerateArray())
+                {
+                    var host = new Uri(source.GetProperty("url").GetString()!).Host;
+                    if (!hosts.Contains(host)) hosts.Add(host);
+                }
+        }
+        var from = hosts.Count == 0 ? "its configured sources" : string.Join(", ", hosts);
+        var folder = Path.Combine(stateRoot, "downloads", "title-update");
+        return $"Downloading the title update ({size:0.0} MB) from {from}. It is checked against SHA-256 " +
+            $"{sha256[..8]}…{sha256[^4..]} and saved in {folder}.";
     }
 
     private async Task RefreshTitleUpdateAsync(string? message = null)
@@ -1253,6 +1305,7 @@ public partial class MainWindow : Window
     private void ApplyTitleUpdate(TitleUpdateStatus status, string? message = null)
     {
         _titleUpdate = status;
+        DownloadTitleUpdateButton.Visibility = status.Installed ? Visibility.Collapsed : Visibility.Visible;
         TitleUpdateToggleButton.IsEnabled = status.Installed;
         TitleUpdateClubCheckBox.IsEnabled = status.Installed;
         TitleUpdateClubCheckBox.IsChecked = status.Club;
@@ -1320,12 +1373,13 @@ public partial class MainWindow : Window
         }
     }
 
-    private async Task ChangeTitleUpdateAsync(string action, string? source, string success)
+    private async Task ChangeTitleUpdateAsync(string action, string? source, string success, string? working = null)
     {
         _busy = true;
         TitleUpdateControls.IsEnabled = false;
         UpdatePrimaryButton();
-        TitleUpdateStatusText.Text = action == "import" ? "Verifying the title update against your disc…" : "Updating…";
+        TitleUpdateStatusText.Text = working ??
+            (action == "import" ? "Verifying the title update against your disc…" : "Updating…");
         try { ApplyTitleUpdate(await RunTitleUpdateToolAsync(action, source), success); }
         catch (Exception ex)
         {

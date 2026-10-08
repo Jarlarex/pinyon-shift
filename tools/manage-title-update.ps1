@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)] [ValidateSet('status', 'import', 'enable', 'disable', 'restore', 'club-on', 'club-off')] [string]$Action,
+    [Parameter(Mandatory)] [ValidateSet('status', 'import', 'download', 'enable', 'disable', 'restore', 'club-on', 'club-off')] [string]$Action,
     [Parameter(Mandatory)] [string]$StateRoot,
     # import: the player's title-update package, folder or ZIP.
     [string]$InputPath
@@ -76,6 +76,12 @@ switch ($Action) {
         } finally {
             if ($source -ne $InputPath) { Remove-Item -LiteralPath $source -Recurse -Force -ErrorAction SilentlyContinue }
         }
+    }
+    'download' {
+        # Fetches from the pinned sources and imports through 'import' above (fetch-title-update.py).
+        $fetched = & $python (Join-Path $PSScriptRoot 'fetch-title-update.py') --state-root $state |
+            Select-Object -Last 1 | ConvertFrom-Json
+        if ($fetched.status -eq 'fallback') { throw "The title update is unavailable: $($fetched.reason)" }
     }
     'enable' {
         if (-not (Get-Status).installed) { throw 'Import the verified title update first.' }

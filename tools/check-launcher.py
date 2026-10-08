@@ -247,6 +247,20 @@ class Check {
             Path.Combine(Path.GetFullPath(reports), bundleName), "Moved crash report lost");
         typeof(MainWindow).GetField("_pendingReport", flags)!.SetValue(window, null);
 
+        // The title-update download states its size, hosts, hash and folder before it starts.
+        var planRoot = Path.Combine(Path.GetTempPath(), "pinyon-tu-plan-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(planRoot, "config"));
+        File.WriteAllText(Path.Combine(planRoot, "config", "supported-title-updates.json"),
+            "{\"updates\":[{\"id\":\"u\",\"package\":{\"size_bytes\":15728640,\"sha256\":\"CC49029A0000000000000000000000000000000000000000000000000000BEEF\"}}]}");
+        File.WriteAllText(Path.Combine(planRoot, "config", "title-update-sources.json"),
+            "{\"schema_version\":1,\"sources\":{\"u\":[{\"id\":\"a\",\"url\":\"https://xboxunity.net/x\"},{\"id\":\"b\",\"url\":\"http://xboxunity.net/x\"}]}}");
+        var plan = (string)typeof(MainWindow).GetMethod("DescribeTitleUpdateDownload", BindingFlags.Static | BindingFlags.NonPublic)!
+            .Invoke(null, [planRoot, @"C:\state"])!;
+        Directory.Delete(planRoot, true);
+        Require(plan.Contains("15.0 MB") && plan.Contains("from xboxunity.net.") && plan.Contains("CC49029A…BEEF") &&
+            plan.Contains(@"C:\state\downloads\title-update"), $"Title-update download plan: {plan}");
+        Require(((Button)window.FindName("DownloadTitleUpdateButton")) is not null, "No title-update download button");
+
         // A recognized disc whose build is not supported yet is verified, not failed.
         typeof(MainWindow).GetMethod("SetPendingBuild", flags)!.Invoke(window, null);
         Require(((TextBlock)window.FindName("HeadlineText")).Text == "Disc verified", "Pending build is shown as a failure");

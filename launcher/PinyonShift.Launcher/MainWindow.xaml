@@ -282,6 +282,9 @@
                                 </CheckBox>
                             </StackPanel>
                             <StackPanel x:Name="TitleUpdateControls" Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                <Button x:Name="DownloadTitleUpdateButton" Content="Download update" Style="{StaticResource QuietButton}"
+                                        Click="DownloadTitleUpdateButton_Click" Margin="0,0,10,0" Visibility="Collapsed"
+                                        AutomationProperties.Name="Download FH1 title update v4"/>
                                 <Button Content="Import update" Style="{StaticResource QuietButton}"
                                         Click="ImportTitleUpdateButton_Click" Margin="0,0,10,0"
                                         AutomationProperties.Name="Import FH1 title update v4"/>
