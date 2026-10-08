@@ -314,7 +314,8 @@ def prepare_entry(content: Path, game: Path, extractor: Path, output: Path, stag
 
 def verify_base(game: Path) -> dict:
     manifest = json.loads((ROOT / "config/supported-dumps.json").read_text(encoding="utf-8"))
-    base = next(d for d in manifest["dumps"] if d["id"] == "forza-horizon-usa-ms-2505-retail-base")
+    # The base-disc adapter is pinned to the one revision whose inputs it was built from.
+    base = next(d for d in manifest["dumps"] if d.get("rally_adapter_inputs"))
     for entry in (*base["executables"], *base["rally_adapter_inputs"]):
         path = game / entry["guest_path"]
         with path.open("rb") as stream:

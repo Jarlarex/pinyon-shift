@@ -48,7 +48,11 @@ $cpuFlags = if ($cpuBaseline -eq 'fma') { '-msse4.1 -mfma -ffp-contract=off' } e
 
 $supportedDumps = Get-Content -LiteralPath (Join-Path $root 'config/supported-dumps.json') -Raw |
     ConvertFrom-Json
-$supportedXex = $supportedDumps.dumps[0].executables |
+# Code generation covers the buildable revision only; schema 1 entries have no build_support.
+$buildableDump = $supportedDumps.dumps |
+    Where-Object { $null -eq $_.PSObject.Properties['build_support'] -or $_.build_support -eq 'supported' } |
+    Select-Object -First 1
+$supportedXex = $buildableDump.executables |
     Where-Object { $_.guest_path -eq 'default.xex' } | Select-Object -First 1
 $gameXex = Resolve-PinyonLocalPath -RelativePath '.local/game/base/default.xex'
 if ($null -eq $supportedXex -or -not (Test-Path -LiteralPath $gameXex -PathType Leaf)) {

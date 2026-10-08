@@ -155,7 +155,10 @@ if (Get-Process pinyon_shift -ErrorAction SilentlyContinue) { throw 'Close the p
 $game = if ($GameRoot) { (Resolve-Path -LiteralPath $GameRoot).Path } else { Join-Path $root '.local/game/base' }
 $script = (Resolve-Path -LiteralPath $RenderTestScript).Path
 $python = Get-PinyonPython
-$dump = (Get-Content (Join-Path $root 'config/supported-dumps.json') -Raw | ConvertFrom-Json).dumps[0]
+# Artifacts are produced from the buildable revision; schema 1 entries have no build_support.
+$dump = (Get-Content (Join-Path $root 'config/supported-dumps.json') -Raw | ConvertFrom-Json).dumps |
+    Where-Object { $null -eq $_.PSObject.Properties['build_support'] -or $_.build_support -eq 'supported' } |
+    Select-Object -First 1
 foreach ($entry in $dump.executables) {
     $path = Join-Path $game $entry.guest_path
     if ((Get-Item -LiteralPath $path).Length -ne $entry.size_bytes -or
