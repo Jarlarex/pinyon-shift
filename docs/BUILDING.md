@@ -40,6 +40,12 @@ Visual Studio initialization uses `%ProgramData%\PinyonShift\build-temp`
 for its child process, so parentheses in a portable install path do not
 break VsDevCmd. The launcher's original TEMP/TMP directories are preserved.
 
+Each recognized disc revision is extracted into its own folder: the USA disc
+into `.local/game/base`, the European disc (media `4000D145`) into
+`.local/game/eur-base`. The European disc is verified and extracted but cannot
+be built yet; setup then stops with exit code 3, records the result in
+`.local/setup-pending-build.json` and leaves any USA build untouched.
+
 The original ISO is opened read-only and is never changed. Setup can be safely
 run again after a failure; completed downloads and extraction are reused after
 verification. Everything produced from the disc is ignored by Git.

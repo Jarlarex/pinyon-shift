@@ -277,7 +277,9 @@ PC at its next build), the graphics driver's own shader cache, and the files
 
 ### Requirements
 
-- The USA retail base disc, serial `MS-2505`, title ID `4D5309C9`.
+- The USA retail base disc, serial `MS-2505`, title ID `4D5309C9`. The European
+  disc (media `4000D145`, version 0.0.0.12) is recognized and extracted, but
+  cannot be built yet.
 - Windows 10 or 11, x64.
 - A GPU with Vulkan 1.3. Only NVIDIA GPUs are
   qualified so far; AMD and Intel are untested. Low-spec 60 uses about
