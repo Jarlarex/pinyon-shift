@@ -29,6 +29,12 @@ $work = Resolve-PinyonLocalPath -RelativePath ('.local/native-renderer/vulkan-pr
 $routeState = Join-Path $work 'state'
 [void][IO.Directory]::CreateDirectory((Join-Path $routeState 'config'))
 if (Test-Path -LiteralPath $config) { Copy-Item -LiteralPath $config -Destination (Join-Path $routeState 'config/pinyon_shift.toml') }
+# The v4 build mounts <state>/title-update-v4 as update:, which holds its patched executables
+# and media; without it the route would start the unpatched disc image.
+$titleUpdate = Join-Path $StateRoot 'title-update-v4'
+if (Test-Path -LiteralPath $titleUpdate -PathType Container) {
+    Copy-Item -LiteralPath $titleUpdate -Destination (Join-Path $routeState 'title-update-v4') -Recurse
+}
 
 function Skip-Preparation([string]$Reason) {
     Write-PinyonEvent shaders 100 "Vulkan shader preparation was skipped: $Reason The first race may stutter while shaders are prepared. Details: $work" -JsonEvents:$JsonEvents
