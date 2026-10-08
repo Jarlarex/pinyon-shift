@@ -3,7 +3,7 @@
   "updates": [
     {
       "id": "forza-horizon-world-v4-4000d145",
-      "status": "applies_to_usa_base_native_port_pending",
+      "status": "applies_to_eur_and_usa_bases_native_port_pending",
       "title_id": "4D5309C9",
       "media_id": "4000D145",
       "source_version": "0000000C",
@@ -35,6 +35,34 @@
         }
       ],
       "verified_bases": [
+        {
+          "media_id": "4000D145",
+          "version": "0000000C",
+          "note": "The update's own base, the EU 0.0.0.12 disc: signatures match and every page verifies; the images equal the USA ones (2026-10-08).",
+          "modules": [
+            {
+              "guest_path": "default.xex",
+              "base_sha256": "4DE2FF6545088CBABC4E18080A67A85EAAFCCB292B6CBDA3630FCF53E5C8C2CA",
+              "image_sha256": "74B033805AB1BCAA04DF57CD926BB2F584E74E570D7739D2552A1228F8B9DD20",
+              "headers_sha256": "0AB86A882D72438F8E39E5654CA17D85BD635B61FF6F2BE59593537848993F73",
+              "pages": 371
+            },
+            {
+              "guest_path": "SpeechFacade_default.xex",
+              "base_sha256": "A14A6ADE33EC967AEEF2A28FFFC496FBBCA05DE1F1D94AE8C342CF3F3819B3CA",
+              "image_sha256": "4F86BD1BEF6C47FFDDF3A570F491684266B67BFFF6601DC9A664C1A68003EFA5",
+              "headers_sha256": "64FD21181FB4E955AA5433AC9D8B3B41C2806E078D31503E64AD3515AA8D355E",
+              "pages": 54
+            },
+            {
+              "guest_path": "XMediaFacade_default.xex",
+              "base_sha256": "DF4D92608FD16E696A3D46C56A67F5077FEC56218AECDB196DE991C151BAC208",
+              "image_sha256": "199D0EA9DE6C9ADFFE968EFA7B6AA90FE424193DBFAC5C2240245807D52E2F81",
+              "headers_sha256": "D0C61321C006C4E2D521B4BF0ED7FB2F37B6D834EB4DF4015233E9567212E787",
+              "pages": 61
+            }
+          ]
+        },
         {
           "media_id": "2DC7007B",
           "version": "0000000A",
