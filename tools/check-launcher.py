@@ -261,6 +261,23 @@ class Check {
             plan.Contains(@"C:\state\downloads\title-update"), $"Title-update download plan: {plan}");
         Require(((Button)window.FindName("DownloadTitleUpdateButton")) is not null, "No title-update download button");
 
+        // The completed setup decides between the base and v4 builds and names the disc they run from.
+        var setupRoot = Path.Combine(Path.GetTempPath(), "pinyon-setup-build-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(setupRoot, ".local"));
+        var readSetup = typeof(MainWindow).GetMethod("ReadSetupBuild", BindingFlags.Static | BindingFlags.NonPublic)!;
+        (bool V4, string GameRoot) Setup(string? json)
+        {
+            var path = Path.Combine(setupRoot, ".local", "setup-state.json");
+            if (json is null) File.Delete(path); else File.WriteAllText(path, json);
+            return ((bool, string))readSetup.Invoke(null, [setupRoot])!;
+        }
+        Require(Setup(null) == (false, ".local/game/base"), "Missing setup state is not the base build");
+        Require(Setup("{\"build\":\"v4\",\"game_root\":\".local/game/eur-base\"}") == (true, ".local/game/eur-base"),
+            "EU v4 setup state not recognized");
+        Require(Setup("{\"build\":\"base\",\"game_root\":\"../../outside\"}") == (false, ".local/game/base"),
+            "Setup state game root escapes .local/game");
+        Directory.Delete(setupRoot, true);
+
         // A recognized disc whose build is not supported yet is verified, not failed.
         typeof(MainWindow).GetMethod("SetPendingBuild", flags)!.Invoke(window, null);
         Require(((TextBlock)window.FindName("HeadlineText")).Text == "Disc verified", "Pending build is shown as a failure");

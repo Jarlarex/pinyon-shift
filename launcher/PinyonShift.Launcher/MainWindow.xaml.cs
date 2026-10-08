@@ -497,18 +497,41 @@ public partial class MainWindow : Window
     private void UpdateSummary()
     {
         var scale = ConfiguredResolutionScale();
-        SetSubhead("Vulkan · " +
+        SetSubhead((_setupBuildV4 ? "Title update v4 · " : "") + "Vulkan · " +
                    $"{scale}× ({1280 * scale} × {720 * scale}) · F6 opens settings in game");
     }
+
+    // The completed setup's build: "v4" when the disc is played with its title update (the
+    // European disc), else the base build; and the extracted disc it runs from.
+    internal static (bool V4, string GameRoot) ReadSetupBuild(string repositoryRoot)
+    {
+        try
+        {
+            using var state = JsonDocument.Parse(File.ReadAllText(Path.Combine(repositoryRoot, ".local", "setup-state.json")));
+            var v4 = state.RootElement.TryGetProperty("build", out var build) && build.GetString() == "v4";
+            var root = state.RootElement.TryGetProperty("game_root", out var game) ? game.GetString() : null;
+            if (root is not null && System.Text.RegularExpressions.Regex.IsMatch(root, @"^\.local/game/[A-Za-z0-9_-]+$"))
+                return (v4, root);
+            return (v4, ".local/game/base");
+        }
+        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            return (false, ".local/game/base");
+        }
+    }
+
+    private bool _setupBuildV4;
 
     private void DetectExistingBuild()
     {
         _gameExecutable = null;
         if (_repositoryRoot is null) return;
-        var candidate = Path.Combine(_repositoryRoot, "out", "build", "win-amd64-release", "pinyon_shift.exe");
+        var (v4, gameRoot) = ReadSetupBuild(_repositoryRoot);
+        _setupBuildV4 = v4;
+        var candidate = Path.Combine(_repositoryRoot, "out", "build", v4 ? "win-amd64-v4" : "win-amd64-release", "pinyon_shift.exe");
         if (File.Exists(candidate))
         {
-            if (!File.Exists(Path.Combine(_repositoryRoot, ".local", "game", "base", "default.xex")))
+            if (!File.Exists(Path.Combine(_repositoryRoot, gameRoot, "default.xex")))
             {
                 HeadlineText.Text = "Restore your game files";
                 SetSubhead("Choose your disc image to run setup again. Your save stays in place.");
@@ -516,7 +539,8 @@ public partial class MainWindow : Window
                 return;
             }
             var payloadMarker = Path.Combine(_repositoryRoot, ".pinyon-source-sha256");
-            if (File.Exists(payloadMarker))
+            // build.json records the base build; a v4 build is rebuilt by Play when needed.
+            if (!v4 && File.Exists(payloadMarker))
             {
                 var matchesRelease = false;
                 try
@@ -584,6 +608,9 @@ public partial class MainWindow : Window
                 try { titleUpdate = await RunTitleUpdateToolAsync("status"); }
                 catch (Exception ex) { AppendLog($"Title update status unavailable, starting the base disc: {ex.Message}"); }
             }
+            // A disc set up as v4 (the European disc) has no base build to fall back on.
+            if (_setupBuildV4 && titleUpdate is { Installed: true, Use: false })
+                titleUpdate.Use = true;
             if (titleUpdate is { Use: true })
             {
                 if (!titleUpdate.Built)
@@ -1306,7 +1333,10 @@ public partial class MainWindow : Window
     {
         _titleUpdate = status;
         DownloadTitleUpdateButton.Visibility = status.Installed ? Visibility.Collapsed : Visibility.Visible;
-        TitleUpdateToggleButton.IsEnabled = status.Installed;
+        // A disc set up as v4 has no base build, so there is nothing to switch back to.
+        TitleUpdateToggleButton.IsEnabled = status.Installed && !_setupBuildV4;
+        if (_setupBuildV4 && status.Installed && message is null)
+            message = "This disc is played with the title update, which was made for it.";
         TitleUpdateClubCheckBox.IsEnabled = status.Installed;
         TitleUpdateClubCheckBox.IsChecked = status.Club;
         TitleUpdateToggleButton.Content = status.Use ? "Use base disc" : "Use v4";
