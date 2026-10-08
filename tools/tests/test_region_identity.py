@@ -180,5 +180,64 @@ class VerifierRegionTests(unittest.TestCase):
                 self.assertEqual(report[key], value, key)
 
 
+PENDING_BUILD_EXIT = 3
+
+
+@unittest.skipUnless(shutil.which("powershell"), "Windows PowerShell required")
+class SetupRegionTests(unittest.TestCase):
+    CONTENTS = {"default.xex": b"eu executable", "media/vo/VO_DE.fev": b"german"}
+
+    def test_pending_region_extracts_beside_usa_and_stops_before_building(self):
+        with tempfile.TemporaryDirectory(prefix="pinyon-region-") as temporary:
+            root = Path(temporary)
+            game = fixture_repo(root, ["verify-extracted-game.ps1", "setup-preview.ps1", "release-common.ps1"],
+                                self.CONTENTS, b"iso")
+            shutil.copyfile(ROOT / "config/release-toolchain.json", root / "config/release-toolchain.json")
+            for name in ("provision-toolchain", "prepare-rexglue", "build-preview", "prepare-fh1-shaders"):
+                (root / f"tools/{name}.ps1").write_text(
+                    "param([switch]$JsonEvents, [string]$GameRoot)\n"
+                    "Add-Content -LiteralPath (Join-Path $PSScriptRoot '../stages.txt') '" + name + "'\n")
+            usa = root / ".local/game/base"
+            usa.mkdir(parents=True)
+            (usa / "default.xex").write_bytes(b"usa executable")
+
+            command = [str(root / "tools/setup-preview.ps1"), "-ExtractedPath", str(game), "-JsonEvents"]
+            result = run_script(*command)
+            self.assertEqual(result.returncode, PENDING_BUILD_EXIT, result.stderr.decode(errors="replace"))
+            eur = root / ".local/game/eur-base"
+            for name, data in self.CONTENTS.items():
+                self.assertEqual((eur / name).read_bytes(), data)
+            self.assertEqual((usa / "default.xex").read_bytes(), b"usa executable")
+            self.assertEqual((root / "stages.txt").read_text().splitlines(), ["provision-toolchain", "prepare-rexglue"])
+            state = json.loads((root / ".local/setup-state.json").read_text())
+            self.assertEqual(state["result"], "extracted_pending_build")
+            self.assertEqual(state["dump_id"], "fixture-eur")
+            self.assertEqual(state["region"], "EUR")
+            self.assertIn(b"not supported yet", result.stdout)
+            self.assertFalse((root / ".local/logs/setup-error.json").exists())
+
+            # A second run reuses the verified extraction and stops at the same point.
+            result = run_script(*command)
+            self.assertEqual(result.returncode, PENDING_BUILD_EXIT, result.stderr.decode(errors="replace"))
+            self.assertEqual((usa / "default.xex").read_bytes(), b"usa executable")
+
+    def test_game_root_outside_the_local_game_folder_is_refused(self):
+        with tempfile.TemporaryDirectory(prefix="pinyon-region-") as temporary:
+            root = Path(temporary)
+            game = fixture_repo(root, ["verify-extracted-game.ps1", "setup-preview.ps1", "release-common.ps1"],
+                                self.CONTENTS, b"iso")
+            shutil.copyfile(ROOT / "config/release-toolchain.json", root / "config/release-toolchain.json")
+            for name in ("provision-toolchain", "prepare-rexglue"):
+                (root / f"tools/{name}.ps1").write_text("param([switch]$JsonEvents)\n")
+            table_path = root / "config/supported-dumps.json"
+            table = json.loads(table_path.read_text())
+            table["dumps"][0]["game_root"] = ".local/game/../../outside"
+            table_path.write_text(json.dumps(table))
+            result = run_script(str(root / "tools/setup-preview.ps1"), "-ExtractedPath", str(game), "-JsonEvents")
+            self.assertEqual(result.returncode, 1)
+            self.assertIn(b"Unexpected local game destination", result.stdout + result.stderr)
+            self.assertFalse((root / "outside").exists())
+
+
 if __name__ == "__main__":
     unittest.main()

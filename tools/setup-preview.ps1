@@ -26,7 +26,6 @@ try {
     $folderInput = $PSCmdlet.ParameterSetName -eq 'Extracted'
     $resolvedIso = if ($folderInput) { $null } else { (Resolve-Path -LiteralPath $IsoPath).Path }
     $resolvedSource = if ($folderInput) { (Resolve-Path -LiteralPath $ExtractedPath).Path } else { $resolvedIso }
-    $gameRoot = Resolve-PinyonLocalPath -RelativePath '.local/game/base'
     $statePath = Resolve-PinyonLocalPath -RelativePath '.local/setup-state.json'
     if (-not [Environment]::Is64BitOperatingSystem) {
         throw 'Pinyon Shift requires 64-bit Windows.'
@@ -60,7 +59,17 @@ try {
         & (Join-Path $PSScriptRoot 'verify-game.ps1') -IsoPath $resolvedIso -Json | ConvertFrom-Json
     }
     if (-not $verification.recognized) { throw 'This game source is not a supported, complete retail revision.' }
-    Write-PinyonEvent verify 15 "Verified $($verification.serial) by exact SHA-256." -JsonEvents:$JsonEvents
+    # Each disc revision has its own game root, so verifying one never replaces another's files.
+    $gameRootRelative = if ($verification.PSObject.Properties['game_root'] -and $verification.game_root) {
+        [string]$verification.game_root } else { '.local/game/base' }
+    if ($gameRootRelative -notmatch '^\.local/game/[A-Za-z0-9_-]+$') { throw 'Unexpected local game destination.' }
+    $gameRoot = Resolve-PinyonLocalPath -RelativePath $gameRootRelative
+    $buildSupport = if ($verification.PSObject.Properties['build_support'] -and $verification.build_support) {
+        [string]$verification.build_support } else { 'supported' }
+    $region = if ($verification.PSObject.Properties['region']) { $verification.region } else { $null }
+    $identity = @($region, $verification.serial) | Where-Object { $_ }
+    $label = if ($identity) { $identity -join ' ' } else { $verification.dump_id }
+    Write-PinyonEvent verify 15 "Verified the $label disc by exact SHA-256." -JsonEvents:$JsonEvents
     if ($VerifyOnly) { return }
 
     & (Join-Path $PSScriptRoot 'provision-toolchain.ps1') -JsonEvents:$JsonEvents | Out-Host
@@ -81,7 +90,7 @@ try {
     }
     if (-not $extractedValid) {
         $checkedGameRoot = [IO.Path]::GetFullPath($gameRoot).TrimEnd('\', '/')
-        $intendedGameRoot = [IO.Path]::GetFullPath((Join-Path $root '.local/game/base')).TrimEnd('\', '/')
+        $intendedGameRoot = [IO.Path]::GetFullPath((Join-Path $root $gameRootRelative)).TrimEnd('\', '/')
         if ($checkedGameRoot -ne $intendedGameRoot) { throw 'Unexpected local game destination.' }
         if ((Test-Path -LiteralPath $checkedGameRoot) -and
             ((Get-Item -LiteralPath $checkedGameRoot).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
@@ -119,6 +128,25 @@ try {
         }
     }
     Write-PinyonEvent extract 58 'Local game files are verified and ready.' -JsonEvents:$JsonEvents
+
+    if ($buildSupport -ne 'supported') {
+        # A recognized disc whose port is unfinished: keep its verified files and stop before
+        # building, since the code generation inputs only cover supported revisions.
+        $pending = [ordered]@{
+            schema_version = 1
+            completed_utc = [DateTime]::UtcNow.ToString('o')
+            dump_id = $verification.dump_id
+            region = $region
+            source_kind = if ($folderInput) { 'extracted' } else { 'iso' }
+            iso_sha256 = $verification.iso_sha256
+            result = 'extracted_pending_build'
+        }
+        [IO.File]::WriteAllText($statePath, ($pending | ConvertTo-Json) + [Environment]::NewLine,
+            [Text.UTF8Encoding]::new($false))
+        Write-PinyonEvent extract 60 "The $label disc is verified and extracted, but its build is not supported yet." `
+            -JsonEvents:$JsonEvents
+        exit 3
+    }
 
     & (Join-Path $PSScriptRoot 'build-preview.ps1') -JsonEvents:$JsonEvents | Out-Host
     & (Join-Path $PSScriptRoot 'prepare-fh1-shaders.ps1') -GameRoot $gameRoot -JsonEvents:$JsonEvents | Out-Host
