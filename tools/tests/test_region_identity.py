@@ -180,6 +180,30 @@ class VerifierRegionTests(unittest.TestCase):
                 self.assertEqual(report[key], value, key)
 
 
+@unittest.skipUnless(shutil.which("powershell"), "Windows PowerShell required")
+class DefaultGameRootTests(unittest.TestCase):
+    def resolve(self, state: str | None) -> str:
+        with tempfile.TemporaryDirectory(prefix="pinyon-root-") as temporary:
+            root = Path(temporary)
+            (root / "tools").mkdir()
+            shutil.copyfile(ROOT / "tools/release-common.ps1", root / "tools/release-common.ps1")
+            if state is not None:
+                (root / ".local").mkdir()
+                (root / ".local/setup-state.json").write_text(state)
+            result = subprocess.run(["powershell", "-NoProfile", "-Command",
+                                     f". '{root / 'tools/release-common.ps1'}'; Get-PinyonDefaultGameRoot"],
+                                    capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            return Path(result.stdout.strip()).relative_to(root).as_posix()
+
+    def test_game_root_follows_the_completed_setup(self):
+        self.assertEqual(self.resolve(None), ".local/game/base")
+        self.assertEqual(self.resolve('{"game_root": ".local/game/eur-base"}'), ".local/game/eur-base")
+        self.assertEqual(self.resolve('{"result": "ready"}'), ".local/game/base")
+        self.assertEqual(self.resolve('{"game_root": "../outside"}'), ".local/game/base")
+        self.assertEqual(self.resolve("not json"), ".local/game/base")
+
+
 PENDING_BUILD_EXIT = 3
 
 

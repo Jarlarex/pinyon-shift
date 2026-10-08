@@ -3,7 +3,7 @@ param(
     # The state root holding the player's verified update in title-update-v4/
     # (tools/verify-fh1-title-update.py --install).
     [Parameter(Mandatory)] [string]$StateRoot,
-    # The extracted USA disc; defaults to .local/game/base.
+    # The extracted disc; defaults to the game root of the last completed setup.
     [string]$GameRoot,
     # 0 picks a job count from the logical processors and installed memory.
     [ValidateRange(0, 32)] [int]$Parallel = 0
@@ -22,7 +22,7 @@ if (Test-Path variable:PSNativeCommandUseErrorActionPreference) {
 
 . (Join-Path $PSScriptRoot 'release-common.ps1')
 $root = Get-PinyonRepoRoot
-$resolvedGameRoot = if ($GameRoot) { [IO.Path]::GetFullPath($GameRoot) } else { Join-Path $root '.local/game/base' }
+$resolvedGameRoot = if ($GameRoot) { [IO.Path]::GetFullPath($GameRoot) } else { Get-PinyonDefaultGameRoot }
 $update = Join-Path ([IO.Path]::GetFullPath($StateRoot)) 'title-update-v4'
 $modules = 'default', 'SpeechFacade_default', 'XMediaFacade_default'
 foreach ($module in $modules) {

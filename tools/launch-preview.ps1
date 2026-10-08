@@ -55,7 +55,7 @@ $executable = Join-Path $resolvedBuildDirectory 'pinyon_shift.exe'
 $resolvedGameRoot = if ($GameRoot) {
     [IO.Path]::GetFullPath($GameRoot)
 } else {
-    Join-Path $repoRoot '.local/game/base'
+    Get-PinyonDefaultGameRoot
 }
 $resolvedStateRoot = if ($StateRoot) {
     [IO.Path]::GetFullPath($StateRoot)

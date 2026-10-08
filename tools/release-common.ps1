@@ -38,6 +38,25 @@ function Resolve-PinyonLocalPath {
     $full
 }
 
+# The extracted disc of the last completed setup (setup-state.json game_root),
+# else the USA default. Each supported disc revision has its own game root.
+function Get-PinyonDefaultGameRoot {
+    $root = Get-PinyonRepoRoot
+    $relative = '.local/game/base'
+    $statePath = Join-Path $root '.local/setup-state.json'
+    if (Test-Path -LiteralPath $statePath -PathType Leaf) {
+        try {
+            $state = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
+            if ($state.PSObject.Properties['game_root'] -and
+                [string]$state.game_root -match '^\.local/game/[A-Za-z0-9_-]+$') {
+                $relative = [string]$state.game_root
+            }
+        }
+        catch { }
+    }
+    Join-Path $root $relative
+}
+
 function Get-PinyonPython {
     $config = Get-PinyonReleaseToolchain
     $pythonRoot = Resolve-PinyonLocalPath -RelativePath $config.python.install_path
