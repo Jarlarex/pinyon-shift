@@ -13,6 +13,12 @@ therefore holds unchanged for EU.
 
 ## 1. Disc identity and verification
 
+**Done (`eu-identity`, 2026-10-08).** The EU dump is in the table with
+`build_support: pending` and its own `game_root`. Both verifiers report the
+region, setup extracts the disc beside the USA one and stops with exit code 3,
+and the launcher shows that state as verified rather than failed. The Rally
+adapter and artifact tools pick dumps by capability instead of by id or position.
+
 | Location | Assumption | EU work |
 | --- | --- | --- |
 | `config/supported-dumps.json` | Single dump `forza-horizon-usa-ms-2505-retail-base`: ISO size/hash, extraction file count/size, per-executable hashes, language list | Add an EU entry read from the user's dump |
