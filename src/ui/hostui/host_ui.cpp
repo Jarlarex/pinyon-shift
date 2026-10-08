@@ -5,6 +5,7 @@
 #include <fstream>
 #include <utility>
 
+#include <rex/cvar.h>
 #include <rex/input/input.h>
 #include <rex/input/input_system.h>
 #include <rex/kernel/xam/module.h>
@@ -20,6 +21,10 @@
 #include "ui/hostui/fh1_archive.h"
 #include "ui/hostui/key_release.h"
 #include "ui/hostui/xds_texture.h"
+
+REXCVAR_DEFINE_BOOL(pinyon_shift_menu_notes, true, "Pinyon Shift",
+                    "Show the orange note under the highlighted row of Pinyon Shift's menus "
+                    "(the original game had none)");
 
 namespace pinyon_shift::hostui {
 namespace {
@@ -870,8 +875,9 @@ void HostUi::DrawMenu(rex::ui::UIDrawContext& context) {
   }
 
   const auto& rows = screen.rows();
-  // A note takes the last row's place, above the button help.
-  const std::string note = screen.note();
+  // A note takes the last row's place, above the button help. Players who
+  // want the menus closer to the original game can hide the notes.
+  const std::string note = REXCVAR_GET(pinyon_shift_menu_notes) ? screen.note() : std::string();
   const size_t visible_rows = note.empty() ? kVisibleRows : kVisibleRows - 1;
   size_t first = 0;
   if (rows.size() > visible_rows && screen.focus() >= visible_rows / 2) {
