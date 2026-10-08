@@ -219,17 +219,44 @@ def verify(package: Path, base_root: Path, extractor: Path, install_root: Path |
                 "media_files": media_files, "executables": sources}
 
 
+EXTRACTOR_NAME = "pinyon_shift_fh1_archive_extract.exe"
+# The game build, then the small tools build that setup makes before the game can be built.
+EXTRACTOR_BUILDS = ("out/build/win-amd64-release", "out/build/title-update-tools")
+
+
+def default_base_root(root: Path = ROOT) -> Path:
+    """The game root of the first supported dump whose installed default.xex is a verified base."""
+    dumps = json.loads((root / "config/supported-dumps.json").read_text())["dumps"]
+    updates = json.loads((root / "config/supported-title-updates.json").read_text())["updates"]
+    verified = {module["base_sha256"] for update in updates for base in update.get("verified_bases", [])
+                for module in base["modules"] if module["guest_path"] == "default.xex"}
+    for dump in dumps:
+        game_root = root / dump.get("game_root", ".local/game/base")
+        executable = game_root / "default.xex"
+        if executable.is_file() and fingerprint(executable)[1] in verified:
+            return game_root
+    return root / ".local/game/base"
+
+
+def default_extractor(root: Path = ROOT) -> Path:
+    candidates = [root / build / EXTRACTOR_NAME for build in EXTRACTOR_BUILDS]
+    return next((path for path in candidates if path.is_file()), candidates[0])
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("package", type=Path)
-    parser.add_argument("--base-root", type=Path, default=ROOT / ".local/game/base")
+    parser.add_argument("--base-root", type=Path,
+                        help="extracted base disc (default: the installed disc that is a verified base)")
     parser.add_argument("--extractor", type=Path,
-                        default=ROOT / "out/build/win-amd64-release/pinyon_shift_fh1_archive_extract.exe")
+                        help=f"archive extractor (default: the first of {', '.join(EXTRACTOR_BUILDS)})")
     parser.add_argument("--install", type=Path, metavar="STATE_ROOT",
                         help=f"after verification, publish the update into STATE_ROOT/{INSTALL_FOLDER}")
     args = parser.parse_args()
     try:
-        result = verify(args.package, args.base_root, args.extractor, args.install)
+        base_root = args.base_root or default_base_root()
+        extractor = args.extractor or default_extractor()
+        result = verify(args.package, base_root, extractor, args.install)
     except (ValueError, OSError, zipfile.BadZipFile) as error:
         print(json.dumps({"package_verified": False, "error": str(error)}, indent=2))
         return 1
