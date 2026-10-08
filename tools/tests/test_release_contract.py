@@ -204,7 +204,8 @@ catch { [Console]::Error.Write($_.Exception.Message); exit 2 }
             self.assertRegex(item["sha256"], r"^[0-9A-F]{64}$")
         self.assertTrue(data["visual_studio"]["bootstrap_url"].startswith("https://"))
         rexglue = data["rexglue"]
-        self.assertEqual(rexglue["repository"], "https://github.com/arcanite24/shiftglue-sdk")
+        # This fork pins its own ShiftGlue fork (discrete-GPU selection on hybrid laptops).
+        self.assertEqual(rexglue["repository"], "https://github.com/Jarlarex/shiftglue-sdk")
         self.assertRegex(rexglue["revision"], r"^[0-9a-f]{40}$")
 
     def test_shiftglue_submodule_matches_the_release_pin(self):
