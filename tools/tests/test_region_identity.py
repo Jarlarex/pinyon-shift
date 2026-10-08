@@ -113,5 +113,72 @@ class DumpTableTests(unittest.TestCase):
                     self.assertEqual(by_path[executable["guest_path"]]["sha256"], executable["sha256"])
 
 
+REGION_FIELDS = dict(region="EUR", media_id="4000D145", version="0.0.0.12",
+                     build_support="pending", game_root=".local/game/eur-base")
+
+
+def fixture_repo(root: Path, scripts: list[str], game_contents: dict[str, bytes], iso: bytes) -> Path:
+    """A temporary repository with one EU-like dump whose ISO and game folder are synthetic."""
+    for script in scripts:
+        target = root / "tools" / script
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(ROOT / "tools" / script, target)
+    config = root / "config"
+    config.mkdir()
+    iso_path = root / "fixture.iso"
+    iso_path.write_bytes(iso)
+    iso_sha256 = hashlib.sha256(iso).hexdigest().upper()
+    game = root / "game"
+    write_tree(game, game_contents)
+    catalog = CATALOG.build_catalog(game, "fixture-eur", iso_sha256)
+    (config / "catalog.json").write_text(json.dumps(catalog), encoding="utf-8")
+    executables = [dict(guest_path=entry["guest_path"], role="entrypoint", size_bytes=entry["size_bytes"],
+                        sha256=entry["sha256"]) for entry in catalog["files"] if entry["guest_path"] == "default.xex"]
+    dump = dict(id="fixture-eur", status="fixture", title_id="4D5309C9", serial=None, **REGION_FIELDS,
+                iso=dict(size_bytes=len(iso), sha256=iso_sha256),
+                extraction=dict(file_catalog="catalog.json", file_count=len(catalog["files"])),
+                executables=executables)
+    (config / "supported-dumps.json").write_text(json.dumps(dict(schema_version=2, dumps=[dump])), encoding="utf-8")
+    return game
+
+
+def run_script(script: Path, *args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script), *args],
+                          capture_output=True)
+
+
+@unittest.skipUnless(shutil.which("powershell"), "Windows PowerShell required")
+class VerifierRegionTests(unittest.TestCase):
+    CONTENTS = {"default.xex": b"eu executable", "media/vo/VO_DE.fev": b"german"}
+
+    def test_iso_verifier_reports_region_fields(self):
+        with tempfile.TemporaryDirectory(prefix="pinyon-region-") as temporary:
+            root = Path(temporary)
+            game = fixture_repo(root, ["verify-game.ps1"], self.CONTENTS, b"fixture iso bytes")
+            result = run_script(root / "tools/verify-game.ps1", "-IsoPath", str(root / "fixture.iso"),
+                                "-ExtractedRoot", str(game), "-Json")
+            self.assertEqual(result.returncode, 0, result.stderr.decode(errors="replace"))
+            report = json.loads(result.stdout)
+            self.assertTrue(report["recognized"])
+            for key, value in REGION_FIELDS.items():
+                self.assertEqual(report[key], value, key)
+            self.assertTrue(report["extracted_executables_match"])
+
+            (root / "fixture.iso").write_bytes(b"fixture iso byteZ")
+            result = run_script(root / "tools/verify-game.ps1", "-IsoPath", str(root / "fixture.iso"), "-Json")
+            self.assertEqual(result.returncode, 1)
+            self.assertFalse(json.loads(result.stdout)["recognized"])
+
+    def test_extracted_verifier_reports_region_fields(self):
+        with tempfile.TemporaryDirectory(prefix="pinyon-region-") as temporary:
+            root = Path(temporary)
+            game = fixture_repo(root, ["verify-extracted-game.ps1"], self.CONTENTS, b"iso")
+            result = run_script(root / "tools/verify-extracted-game.ps1", "-ExtractedRoot", str(game), "-Json")
+            self.assertEqual(result.returncode, 0, result.stderr.decode(errors="replace"))
+            report = json.loads(result.stdout)
+            for key, value in REGION_FIELDS.items():
+                self.assertEqual(report[key], value, key)
+
+
 if __name__ == "__main__":
     unittest.main()

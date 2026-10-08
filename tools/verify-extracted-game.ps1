@@ -76,6 +76,12 @@ if ($null -ne $matchedDump) {
     $result.status = $matchedDump.status
     $result.title_id = $matchedDump.title_id
     $result.serial = $matchedDump.serial
+    # Schema 1 entries predate the region fields: the USA disc, built in the default game root.
+    foreach ($field in @(@('region', $null), @('media_id', $null), @('version', $null),
+            @('build_support', 'supported'), @('game_root', '.local/game/base'))) {
+        $property = $matchedDump.PSObject.Properties[$field[0]]
+        $result[$field[0]] = if ($null -eq $property) { $field[1] } else { $property.Value }
+    }
     # Matching extracted files cannot establish the original ISO's whole-file hash.
     $result.iso_sha256 = $null
     $result.extracted_executables_match = $true
