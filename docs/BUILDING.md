@@ -121,6 +121,20 @@ developer build under qualification. Do not copy this package into the base
 preview: its code is recompiled from the base executable, so it ignores a
 `.xexp` and must never mount v4's `media.zip`.
 
+The European disc (media `4000D145`) is the update's own base: its signatures
+match and the patched images are identical to the USA ones. When setup
+verifies a disc that is a verified base, it downloads the pinned package from
+the sources in `config/title-update-sources.json` into
+`<state>/downloads/title-update`, accepts it only at the pinned size and
+SHA-256, and installs it through the same verifier as **Import update**.
+Setup first builds the small archive extractor
+(`tools/build-title-update-tools.ps1`) if no build has one. On the European
+disc v4 is then switched on unless base-disc saves already exist; on the USA
+disc the base build stays the default. Offline (`PINYON_OFFLINE=1`) or after
+any download or verification failure, setup continues with the base disc. The
+launcher's update row offers **Download update** and shows what it fetches
+before it starts.
+
 A developer v4 build uses separate generated code and build folders:
 
 ```powershell

@@ -62,6 +62,13 @@ adapter and artifact tools pick dumps by capability instead of by id or position
 
 ## 5. Title update
 
+**Done (`tu-autodownload`, 2026-10-08).** EU `4000D145` is a verified base: the
+patched EU images equal the USA v4 images, so the existing v4 port applies to
+EU unchanged; only the headers differ (media ID and version). Setup downloads,
+verifies and installs the update automatically, the verifier picks the
+installed disc as its base, and the launcher can download it from the update
+row. Building and running EU + v4 is the `eu-v4` module.
+
 | Location | Assumption | EU work |
 | --- | --- | --- |
 | `config/supported-title-updates.json` | `verified_bases` has only USA `2DC7007B` 0.0.0.10 (the TU's own target is media `4000D145` 0.0.0.12) | Add the EU base once verified (EU may be the TU's native target) |
