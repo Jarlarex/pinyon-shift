@@ -325,6 +325,11 @@ public partial class MainWindow : Window
                 try { if (!process.HasExited) process.Kill(entireProcessTree: true); } catch { }
             });
             await process.WaitForExitAsync(_cancellation.Token);
+            if (process.ExitCode == PendingBuildExitCode)
+            {
+                SetPendingBuild();
+                return;
+            }
             if (process.ExitCode != 0)
                 throw new InvalidOperationException(DescribeSetupFailure(process.ExitCode, setupStartedUtc));
 
@@ -906,6 +911,29 @@ public partial class MainWindow : Window
         OpenLogsButton.Visibility = Visibility.Visible;
         OpenStateFolderButton.Visibility = Visibility.Visible;
         AppendLog("Build complete. Generated files remain on this computer.");
+    }
+
+    // setup-preview.ps1 exits with this after verifying and extracting a recognized disc
+    // whose build is not supported yet (for example the European revision).
+    private const int PendingBuildExitCode = 3;
+
+    private void SetPendingBuild()
+    {
+        var build = Array.IndexOf(RouteStep.StageOrder, "build");
+        foreach (var step in _steps)
+        {
+            var index = Array.IndexOf(RouteStep.StageOrder, step.Stage.ToLowerInvariant());
+            var state = index >= 0 && index < build ? StepState.Complete : StepState.Waiting;
+            step.SetState(state, WaitingBrush, ActiveBrush, CompleteBrush, FailedBrush);
+        }
+        HeadlineText.Text = "Disc verified";
+        const string message = "This disc is recognized and extracted on this PC, but building it is not supported yet. Files for other discs were not changed.";
+        SetSubhead(message);
+        ProgressMessageText.Text = message;
+        SetPrimaryText("Verify and build");
+        ShowPanel(View.Setup);
+        OpenLogsButton.Visibility = Visibility.Visible;
+        AppendLog("Disc verified and extracted; its build is not supported yet.");
     }
 
     private void SetFailure(string headline, string message)

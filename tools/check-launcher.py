@@ -247,6 +247,15 @@ class Check {
             Path.Combine(Path.GetFullPath(reports), bundleName), "Moved crash report lost");
         typeof(MainWindow).GetField("_pendingReport", flags)!.SetValue(window, null);
 
+        // A recognized disc whose build is not supported yet is verified, not failed.
+        typeof(MainWindow).GetMethod("SetPendingBuild", flags)!.Invoke(window, null);
+        Require(((TextBlock)window.FindName("HeadlineText")).Text == "Disc verified", "Pending build is shown as a failure");
+        Require(primary.Text == "Verify and build", "Pending build does not offer setup again");
+        var routeSteps = (System.Collections.Generic.IEnumerable<RouteStep>)typeof(MainWindow)
+            .GetField("_steps", flags)!.GetValue(window)!;
+        var routeStates = string.Join(",", System.Linq.Enumerable.Select(routeSteps, step => step.State.ToString()));
+        Require(routeStates == "Complete,Complete,Complete,Waiting,Waiting", $"Pending build route: {routeStates}");
+
         var label = (System.Windows.Documents.Run)window.FindName("BuildLocationRun");
         label.Text = @"D:\Games\A deliberately long installation directory\PinyonShift\source\0.1.0\.local\preview";
         ((FrameworkElement)window.FindName("LogPanel")).Visibility = Visibility.Visible;
