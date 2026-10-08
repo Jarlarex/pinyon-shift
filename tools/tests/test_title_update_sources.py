@@ -91,5 +91,187 @@ class DefaultInputTests(unittest.TestCase):
             self.assertEqual(TITLE_UPDATE.default_extractor(root), release)
 
 
+import http.server
+import os
+import threading
+
+FETCH_SPEC = importlib.util.spec_from_file_location("fetch_title_update", ROOT / "tools/fetch-title-update.py")
+FETCH = importlib.util.module_from_spec(FETCH_SPEC)
+FETCH_SPEC.loader.exec_module(FETCH)
+
+PACKAGE = os.urandom(200_000)
+
+
+class ScriptedServer:
+    """A local HTTP server; each path has a behavior, and every request is counted."""
+
+    def __init__(self, routes: dict):
+        self.routes, self.hits = routes, []
+        server = self
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def do_GET(self):
+                server.hits.append((self.path, self.headers.get("Range")))
+                kind, body = server.routes.get(self.path, ("404", b""))
+                if kind == "404":
+                    self.send_error(404)
+                elif kind == "redirect":
+                    self.send_response(302)
+                    self.send_header("Location", body)
+                    self.end_headers()
+                elif kind == "drop":
+                    # Announce the full size, then close after part of the body.
+                    self.send_response(200)
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body[: len(body) // 2])
+                    server.routes[self.path] = ("range", body)
+                elif kind == "range" and self.headers.get("Range"):
+                    start = int(self.headers["Range"].removeprefix("bytes=").split("-")[0])
+                    self.send_response(206)
+                    self.send_header("Content-Range", f"bytes {start}-{len(body) - 1}/{len(body)}")
+                    self.send_header("Content-Length", str(len(body) - start))
+                    self.end_headers()
+                    self.wfile.write(body[start:])
+                else:
+                    self.send_response(200)
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+
+        self.httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.base = f"http://127.0.0.1:{self.httpd.server_address[1]}"
+        threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+
+    def close(self):
+        self.httpd.shutdown()
+        self.httpd.server_close()
+
+
+class FetchTests(unittest.TestCase):
+    UPDATE = "fixture-update"
+
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory(prefix="pinyon-tu-fetch-")
+        self.root = Path(self.temporary.name) / "repo"
+        self.state = Path(self.temporary.name) / "state"
+        (self.root / "config").mkdir(parents=True)
+        package = dict(size_bytes=len(PACKAGE), sha256=hashlib.sha256(PACKAGE).hexdigest().upper())
+        (self.root / "config/supported-title-updates.json").write_text(
+            json.dumps(dict(updates=[dict(id=self.UPDATE, package=package)])))
+        self.events = []
+
+    def tearDown(self):
+        self.temporary.cleanup()
+
+    def serve(self, routes: dict) -> ScriptedServer:
+        server = ScriptedServer(routes)
+        self.addCleanup(server.close)
+        sources = [dict(id=path.strip("/"), url=server.base + path) for path in routes if path.startswith("/s")]
+        (self.root / "config/title-update-sources.json").write_text(
+            json.dumps(dict(schema_version=1, sources={self.UPDATE: sources})))
+        return server
+
+    def fetch(self, **options):
+        return FETCH.fetch(self.state, update_id=self.UPDATE, root=self.root, emit=self.events.append, **options)
+
+    @property
+    def package(self) -> Path:
+        return self.state / "downloads/title-update" / f"{self.UPDATE}.pkg"
+
+    def test_falls_through_to_the_next_source_and_publishes_the_package(self):
+        self.serve({"/s1": ("404", b""), "/s2": ("plain", PACKAGE)})
+        result = self.fetch()
+        self.assertEqual(result["status"], "downloaded")
+        self.assertEqual(result["source"], "s2")
+        self.assertEqual(self.package.read_bytes(), PACKAGE)
+        self.assertFalse(self.package.with_suffix(".partial").exists())
+        names = [event["event"] for event in self.events]
+        self.assertEqual(names[0], "tu_download_plan")
+        self.assertIn("tu_download_source_failed", names)
+        self.assertEqual(names[-1], "tu_download_done")
+
+    def test_wrong_bytes_everywhere_fall_back_without_leaving_files(self):
+        wrong = bytearray(PACKAGE)
+        wrong[0] ^= 1
+        self.serve({"/s1": ("plain", bytes(wrong)), "/s2": ("plain", bytes(wrong))})
+        result = self.fetch()
+        self.assertEqual(result["status"], "fallback")
+        self.assertEqual([failure["source"] for failure in result["failures"]], ["s1", "s2"])
+        self.assertFalse(self.package.exists())
+        self.assertFalse(self.package.with_suffix(".partial").exists())
+        self.assertEqual(self.events[-1]["event"], "tu_download_fallback")
+
+    def test_oversized_body_is_aborted_at_the_pinned_size(self):
+        self.serve({"/s1": ("plain", PACKAGE + b"x" * 100_000)})
+        result = self.fetch()
+        self.assertEqual(result["status"], "fallback")
+        self.assertIn("larger", result["failures"][0]["reason"])
+        self.assertFalse(self.package.exists())
+
+    def test_interrupted_transfer_resumes_with_range(self):
+        server = self.serve({"/s1": ("drop", PACKAGE)})
+        self.assertEqual(self.fetch()["status"], "fallback")
+        self.assertTrue(self.package.with_suffix(".partial").is_file())
+        result = self.fetch()
+        self.assertEqual(result["status"], "downloaded")
+        self.assertEqual(self.package.read_bytes(), PACKAGE)
+        self.assertEqual(server.hits[-1][1], f"bytes={len(PACKAGE) // 2}-")
+
+    def test_source_that_ignores_range_restarts_cleanly(self):
+        partial = self.package.with_suffix(".partial")
+        partial.parent.mkdir(parents=True)
+        partial.write_bytes(PACKAGE[:1000])
+        self.serve({"/s1": ("plain", PACKAGE)})
+        self.assertEqual(self.fetch()["status"], "downloaded")
+        self.assertEqual(self.package.read_bytes(), PACKAGE)
+
+    def test_cached_package_needs_no_network_and_a_damaged_one_is_replaced(self):
+        server = self.serve({"/s1": ("plain", PACKAGE)})
+        self.assertEqual(self.fetch()["status"], "downloaded")
+        hits = len(server.hits)
+        self.assertEqual(self.fetch()["status"], "cached")
+        self.assertEqual(len(server.hits), hits)
+        self.package.write_bytes(b"damaged")
+        self.assertEqual(self.fetch()["status"], "downloaded")
+        self.assertEqual(self.package.read_bytes(), PACKAGE)
+
+    def test_offline_makes_no_requests(self):
+        server = self.serve({"/s1": ("plain", PACKAGE)})
+        self.assertEqual(self.fetch(offline=True)["status"], "fallback")
+        self.assertEqual(server.hits, [])
+        self.assertEqual(self.events[-1]["event"], "tu_download_fallback")
+
+    def test_redirect_loops_fail_and_the_next_source_is_tried(self):
+        server = self.serve({"/s1": ("redirect", "/loop"), "/s2": ("plain", PACKAGE)})
+        server.routes["/loop"] = ("redirect", "/loop")
+        result = self.fetch()
+        self.assertEqual(result["status"], "downloaded")
+        self.assertEqual(result["source"], "s2")
+        self.assertLessEqual(sum(path == "/loop" for path, _ in server.hits), FETCH.MAX_REDIRECTS)
+
+    def test_nothing_is_written_outside_the_download_folder(self):
+        self.serve({"/s1": ("plain", PACKAGE)})
+        self.fetch()
+        written = {path.relative_to(self.state).as_posix() for path in self.state.rglob("*") if path.is_file()}
+        self.assertEqual(written, {f"downloads/title-update/{self.UPDATE}.pkg"})
+
+
+class SourceListTests(unittest.TestCase):
+    def test_sources_name_known_updates_with_http_urls_and_no_hashes(self):
+        sources = load("title-update-sources.json")
+        known = {update["id"] for update in load("supported-title-updates.json")["updates"]}
+        self.assertEqual(sources["schema_version"], 1)
+        for update_id, entries in sources["sources"].items():
+            self.assertIn(update_id, known)
+            self.assertEqual(len({entry["id"] for entry in entries}), len(entries))
+            for entry in entries:
+                self.assertEqual(set(entry), {"id", "url"})
+                self.assertRegex(entry["url"], r"^https?://")
+
+
 if __name__ == "__main__":
     unittest.main()

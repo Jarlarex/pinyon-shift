@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "sources": {
+    "forza-horizon-world-v4-4000d145": [
+      {
+        "id": "xboxunity-https",
+        "url": "https://xboxunity.net/Resources/Lib/TitleUpdate.php?tuid=22974"
+      },
+      {
+        "id": "xboxunity-http",
+        "url": "http://xboxunity.net/Resources/Lib/TitleUpdate.php?tuid=22974"
+      }
+    ]
+  }
+}
