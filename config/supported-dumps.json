@@ -91,7 +91,7 @@
     {
       "id": "forza-horizon-eur-4000d145-retail-base",
       "status": "locally_verified_not_redump_hash_matched",
-      "build_support": "pending",
+      "build_support": "v4",
       "game_root": ".local/game/eur-base",
       "platform": "Xbox 360",
       "region": "EUR",

@@ -22,7 +22,7 @@ def verify(*args: str) -> dict:
 @unittest.skipUnless(DUMPS and shutil.which("powershell"), "set PINYON_DUMPS_DIR to run against real dumps")
 class RealDumpRegionTests(unittest.TestCase):
     def test_each_iso_is_recognized_with_its_region(self):
-        expected = {"USA": ("2DC7007B", "supported"), "EUR": ("4000D145", "pending")}
+        expected = {"USA": ("2DC7007B", "supported"), "EUR": ("4000D145", "v4")}
         seen = set()
         for iso in sorted(Path(DUMPS).glob("*.iso")):
             with self.subTest(iso=iso.name):

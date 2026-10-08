@@ -133,14 +133,24 @@ try {
 
     # The pinned title update for this disc, when the disc is one of its verified bases.
     # Failures fall back to the base disc inside the step, so they never stop setup.
+    $titleUpdateState = if ($StateRoot) { [IO.Path]::GetFullPath($StateRoot) } else {
+        Resolve-PinyonLocalPath -RelativePath '.local/preview' }
     if ($verification.PSObject.Properties['media_id'] -and $verification.media_id) {
-        $titleUpdateState = if ($StateRoot) { [IO.Path]::GetFullPath($StateRoot) } else {
-            Resolve-PinyonLocalPath -RelativePath '.local/preview' }
         & (Join-Path $PSScriptRoot 'setup-title-update.ps1') -StateRoot $titleUpdateState `
             -MediaId $verification.media_id -Region $region -JsonEvents:$JsonEvents | Out-Host
     }
 
-    if ($buildSupport -ne 'supported') {
+    # A 'v4' disc is built only on top of its installed, verified title update.
+    $updateFiles = 'default.xexp', 'SpeechFacade_default.xexp', 'XMediaFacade_default.xexp', 'media.zip'
+    $updateInstalled = @($updateFiles | Where-Object {
+        Test-Path -LiteralPath (Join-Path $titleUpdateState "title-update-v4/$_") -PathType Leaf }).Count -eq $updateFiles.Count
+    if ($buildSupport -eq 'v4' -and -not $updateInstalled) {
+        Write-PinyonEvent extract 60 ("The $label disc needs the title update; connect to the internet or import it, " +
+            'then run setup again.') -JsonEvents:$JsonEvents
+        exit 3
+    }
+
+    if ($buildSupport -notin 'supported', 'v4') {
         # A recognized disc whose port is unfinished: keep its verified files and stop before
         # building, since the code generation inputs only cover supported revisions.
         $pending = [ordered]@{
@@ -161,12 +171,23 @@ try {
         exit 3
     }
 
-    & (Join-Path $PSScriptRoot 'build-preview.ps1') -JsonEvents:$JsonEvents | Out-Host
-    & (Join-Path $PSScriptRoot 'prepare-fh1-shaders.ps1') -GameRoot $gameRoot -JsonEvents:$JsonEvents | Out-Host
+    if ($buildSupport -eq 'v4') {
+        # The update's code replaces the disc's: build v4 from this disc's executables.
+        Write-PinyonEvent build 60 "Building the $label disc with its title update. This takes a while the first time." `
+            -JsonEvents:$JsonEvents
+        & (Join-Path $PSScriptRoot 'build-v4.ps1') -StateRoot $titleUpdateState -GameRoot $gameRoot | Out-Host
+        & (Join-Path $PSScriptRoot 'prepare-fh1-shaders.ps1') -StateRoot $titleUpdateState -GameRoot $gameRoot `
+            -BuildDirectory (Join-Path $root 'out/build/win-amd64-v4') -JsonEvents:$JsonEvents | Out-Host
+    } else {
+        & (Join-Path $PSScriptRoot 'build-preview.ps1') -JsonEvents:$JsonEvents | Out-Host
+        & (Join-Path $PSScriptRoot 'prepare-fh1-shaders.ps1') -GameRoot $gameRoot -JsonEvents:$JsonEvents | Out-Host
+    }
     $state = [ordered]@{
         schema_version = 1
         completed_utc = [DateTime]::UtcNow.ToString('o')
         dump_id = $verification.dump_id
+        build = if ($buildSupport -eq 'v4') { 'v4' } else { 'base' }
+        game_root = $gameRootRelative
         source_kind = if ($folderInput) { 'extracted' } else { 'iso' }
         iso_sha256 = $verification.iso_sha256
         result = 'ready'

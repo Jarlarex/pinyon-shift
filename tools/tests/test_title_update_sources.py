@@ -20,6 +20,13 @@ class VerifiedBaseTests(unittest.TestCase):
                     self.assertEqual({module["guest_path"]: module["base_sha256"] for module in base["modules"]},
                                      executables)
 
+    def test_dumps_built_with_the_update_are_verified_bases(self):
+        bases = {base["media_id"] for update in load("supported-title-updates.json")["updates"]
+                 for base in update["verified_bases"]}
+        for dump in load("supported-dumps.json")["dumps"]:
+            if dump["build_support"] == "v4":
+                self.assertIn(dump["media_id"], bases, dump["id"])
+
     def test_eu_base_is_the_update_target_and_rebuilds_the_same_images(self):
         update = load("supported-title-updates.json")["updates"][0]
         bases = {base["media_id"]: base for base in update["verified_bases"]}

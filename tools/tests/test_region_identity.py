@@ -78,7 +78,7 @@ class DumpTableTests(unittest.TestCase):
                 self.assertIn(dump["region"], {"USA", "EUR"})
                 self.assertRegex(dump["media_id"], r"^[0-9A-F]{8}$")
                 self.assertRegex(dump["version"], r"^\d+\.\d+\.\d+\.\d+$")
-                self.assertIn(dump["build_support"], {"supported", "pending"})
+                self.assertIn(dump["build_support"], {"supported", "v4", "pending"})
                 self.assertTrue(dump["game_root"].startswith(".local/game/"))
                 self.assertTrue(dump["voice_languages"])
                 self.assertTrue(dump["serial"] is None or isinstance(dump["serial"], str))
@@ -90,11 +90,11 @@ class DumpTableTests(unittest.TestCase):
         self.assertEqual(usa["build_support"], "supported")
         self.assertEqual(self.table["dumps"][0], usa)
 
-    def test_eur_disc_is_recognized_but_not_buildable_yet(self):
+    def test_eur_disc_builds_on_its_title_update(self):
         eur = next(dump for dump in self.table["dumps"] if dump["region"] == "EUR")
         self.assertEqual(eur["media_id"], "4000D145")
         self.assertEqual(eur["version"], "0.0.0.12")
-        self.assertEqual(eur["build_support"], "pending")
+        self.assertEqual(eur["build_support"], "v4")
         self.assertIsNone(eur["serial"])
         self.assertNotIn("rally_adapter_inputs", eur)
         self.assertEqual(eur["title_id"], "4D5309C9")
@@ -229,6 +229,55 @@ class SetupRegionTests(unittest.TestCase):
             result = run_script(*command)
             self.assertEqual(result.returncode, PENDING_BUILD_EXIT, result.stderr.decode(errors="replace"))
             self.assertEqual((usa / "default.xex").read_bytes(), b"usa executable")
+
+    def v4_fixture(self, root: Path, *, update_installed: bool) -> list[str]:
+        game = fixture_repo(root, ["verify-extracted-game.ps1", "setup-preview.ps1", "release-common.ps1"],
+                            self.CONTENTS, b"iso")
+        shutil.copyfile(ROOT / "config/release-toolchain.json", root / "config/release-toolchain.json")
+        table_path = root / "config/supported-dumps.json"
+        table = json.loads(table_path.read_text())
+        table["dumps"][0]["build_support"] = "v4"
+        table_path.write_text(json.dumps(table))
+        stages = "Add-Content -LiteralPath (Join-Path $PSScriptRoot '../stages.txt')"
+        for name in ("provision-toolchain", "prepare-rexglue", "build-preview"):
+            (root / f"tools/{name}.ps1").write_text(f"param([switch]$JsonEvents)\n{stages} '{name}'\n")
+        (root / "tools/setup-title-update.ps1").write_text(
+            "param([string]$StateRoot, [string]$MediaId, [string]$Region, [switch]$JsonEvents)\n"
+            f"{stages} 'title-update'\n")
+        (root / "tools/build-v4.ps1").write_text(
+            "param([string]$StateRoot, [string]$GameRoot, [switch]$JsonEvents)\n"
+            f"{stages} \"build-v4 $(Split-Path $GameRoot -Leaf) $(Split-Path $StateRoot -Leaf)\"\n")
+        (root / "tools/prepare-fh1-shaders.ps1").write_text(
+            "param([string]$StateRoot, [string]$GameRoot, [string]$BuildDirectory, [switch]$JsonEvents)\n"
+            f"{stages} \"shaders $(Split-Path $GameRoot -Leaf) $(Split-Path $BuildDirectory -Leaf)\"\n")
+        if update_installed:
+            update = root / ".local/preview/title-update-v4"
+            update.mkdir(parents=True)
+            for name in ("default.xexp", "SpeechFacade_default.xexp", "XMediaFacade_default.xexp", "media.zip"):
+                (update / name).write_bytes(b"verified")
+        return [str(root / "tools/setup-preview.ps1"), "-ExtractedPath", str(game), "-JsonEvents"]
+
+    def test_v4_region_builds_the_title_update_from_its_own_game_root(self):
+        with tempfile.TemporaryDirectory(prefix="pinyon-region-") as temporary:
+            root = Path(temporary)
+            result = run_script(*self.v4_fixture(root, update_installed=True))
+            self.assertEqual(result.returncode, 0, result.stdout.decode(errors="replace"))
+            self.assertEqual((root / "stages.txt").read_text().splitlines(),
+                             ["provision-toolchain", "prepare-rexglue", "title-update",
+                              "build-v4 eur-base preview", "shaders eur-base win-amd64-v4"])
+            state = json.loads((root / ".local/setup-state.json").read_text())
+            self.assertEqual(state["build"], "v4")
+            self.assertEqual(state["game_root"], ".local/game/eur-base")
+            self.assertEqual(state["result"], "ready")
+
+    def test_v4_region_without_its_title_update_stops_and_says_why(self):
+        with tempfile.TemporaryDirectory(prefix="pinyon-region-") as temporary:
+            root = Path(temporary)
+            result = run_script(*self.v4_fixture(root, update_installed=False))
+            self.assertEqual(result.returncode, PENDING_BUILD_EXIT, result.stderr.decode(errors="replace"))
+            self.assertIn(b"needs the title update", result.stdout)
+            self.assertNotIn("build-v4", (root / "stages.txt").read_text())
+            self.assertFalse((root / ".local/setup-state.json").exists())
 
     def test_game_root_outside_the_local_game_folder_is_refused(self):
         with tempfile.TemporaryDirectory(prefix="pinyon-region-") as temporary:
