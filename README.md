@@ -40,8 +40,8 @@ an AMD Radeon 860M.
 | Discrete GPU on hybrid laptops | Working (fork of ShiftGlue, see below) |
 | Video memory | Peak 1.3 GB of an 8 GB card in a long session |
 | DLC installed and enabled automatically | 22 packages, see [the DLC matrix](docs/DLC_EU_MATRIX.md) |
-| DLC cars in the Autoshow, bought, driven, kept after a restart | Checked by playing |
-| Rally Expansion (native, from the title update) | Installed and loading; stages still to be played through |
+| DLC cars in the Autoshow, bought, driven, kept after a restart | Checked by playing: every car except three whose packages carry no licence for them (2003 Ford Focus SVT, Challenger SRT8 392 Rockstar, Mustang Boss 302 Pizza Hut) |
+| Rally Expansion (native, from the title update) | Working: stages played through |
 | 1000 Club | Offline mode on by default (its online goals are confirmed locally) |
 | Fast Travel Anywhere | Granted automatically on the title update (it was a token-store unlock) |
 | EU disc **without** the title update | Not buildable yet; setup stops and asks for the update |
@@ -173,11 +173,10 @@ the config still forces a specific device.
 
 ## Known issues
 
-- Rally stages, co-driver calls and the Rally hub have not been played through
-  on the EU build yet.
-- An early session showed hitches of up to 1.4 s while driving fast, from shaders
-  being translated during play before shader preparation worked; recheck after
-  shader preparation.
+- Three DLC cars are not available from the supplied packages: the 2003 Ford
+  Focus SVT (Rally's Season Pass offer), the Challenger SRT8 392 Rockstar (its
+  package is not among the supplied files) and the Mustang Boss 302 Pizza Hut
+  Edition (its package carries no licence).
 - The archive extractor crashes on a truncated package instead of reporting it.
 - The EU disc cannot be built without the title update.
 - See upstream's [BUGS.md](BUGS.md) for renderer issues shared with the USA build.

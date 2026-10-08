@@ -29,7 +29,7 @@ a playtest in the Autoshow and events and are pending.
 | January Recaro Car Pack | `FFFFFFFF` | yes | yes | db, effects | yes (player check 2026-10-08) | pending | pending |
 | 2010 Nissan 370Z | `00000001` | yes | yes | strings | yes (player check 2026-10-08) | pending | pending |
 | 1000 Club Expansion Pack | `00000001` | yes | yes | db, effects | yes (player check 2026-10-08) | pending | pending |
-| Rally Expansion Pack | `00000001` | yes (2026-10-08, accepted copy `0D9F6833…` from a later supply) | yes (`DLCRoot8`) | pending | pending (native v4 Rally) | pending | pending |
+| Rally Expansion Pack | `00000001` | yes (accepted copy `0D9F6833…`) | yes (`DLCRoot8`) | yes | yes, except the 2003 Ford Focus SVT (Season Pass offer, licence bit 4 not in this package) | yes | yes; stages played through (player check 2026-10-08) |
 
 Notes:
 - Purchases persist: a Civic Si and a GMC Vandura bought on the EU save were still owned after a restart (player check 2026-10-08).
@@ -48,4 +48,4 @@ Notes:
 | --- | --- | --- |
 | The achievements screen reopens every ~150 ms after closing, so the game cannot be resumed | Session `20261008T172437Z`: repeating `xam.dialog.open kind=achievements` → `hostui.open` → `hostui.closed` until a forced exit | Fixed in `8e40e24`: the host UI swallowed the release of the key that chose Achievements, so the keyboard emulation kept it held. Needs a manual keyboard check (scripted routes drive the pad) |
 | The archive extractor crashes (0xC0000005) on a truncated STFS package instead of reporting an error | Rally copy `53037F21…` | Open: SDK package reader should bound reads by the file size |
-| Visual artifacts when driving fast | Player report. Same session: no dropped draws (`skips={}`), no shader-pack misses; frame time median 8.3 ms, p99 20 ms, 81 frames over 100 ms (max 1.4 s), consistent with first-use shader translation before shader preparation worked (`5cf0740`); peak VRAM 1.3 GB of a 7.1 GB budget | Open: recheck after preparation; needs a description or screenshot if it is not stutter |
+| Visual artifacts when driving fast | Player report. Same session: no dropped draws (`skips={}`), no shader-pack misses; frame time median 8.3 ms, p99 20 ms, 81 frames over 100 ms (max 1.4 s), consistent with first-use shader translation before shader preparation worked (`5cf0740`); peak VRAM 1.3 GB of a 7.1 GB budget | Resolved: no excessive stutter after shader preparation (player check 2026-10-08) |
