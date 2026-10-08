@@ -200,6 +200,9 @@ class SetupRegionTests(unittest.TestCase):
             usa = root / ".local/game/base"
             usa.mkdir(parents=True)
             (usa / "default.xex").write_bytes(b"usa executable")
+            # The completed USA build's state must keep describing that build.
+            usa_state = '{"dump_id": "forza-horizon-usa-ms-2505-retail-base", "result": "ready"}\n'
+            (root / ".local/setup-state.json").write_text(usa_state)
 
             command = [str(root / "tools/setup-preview.ps1"), "-ExtractedPath", str(game), "-JsonEvents"]
             result = run_script(*command)
@@ -209,7 +212,8 @@ class SetupRegionTests(unittest.TestCase):
                 self.assertEqual((eur / name).read_bytes(), data)
             self.assertEqual((usa / "default.xex").read_bytes(), b"usa executable")
             self.assertEqual((root / "stages.txt").read_text().splitlines(), ["provision-toolchain", "prepare-rexglue"])
-            state = json.loads((root / ".local/setup-state.json").read_text())
+            self.assertEqual((root / ".local/setup-state.json").read_text(), usa_state)
+            state = json.loads((root / ".local/setup-pending-build.json").read_text())
             self.assertEqual(state["result"], "extracted_pending_build")
             self.assertEqual(state["dump_id"], "fixture-eur")
             self.assertEqual(state["region"], "EUR")

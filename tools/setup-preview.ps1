@@ -141,7 +141,9 @@ try {
             iso_sha256 = $verification.iso_sha256
             result = 'extracted_pending_build'
         }
-        [IO.File]::WriteAllText($statePath, ($pending | ConvertTo-Json) + [Environment]::NewLine,
+        # Recorded beside setup-state.json, which keeps describing the last completed build.
+        $pendingPath = Resolve-PinyonLocalPath -RelativePath '.local/setup-pending-build.json'
+        [IO.File]::WriteAllText($pendingPath, ($pending | ConvertTo-Json) + [Environment]::NewLine,
             [Text.UTF8Encoding]::new($false))
         Write-PinyonEvent extract 60 "The $label disc is verified and extracted, but its build is not supported yet." `
             -JsonEvents:$JsonEvents
