@@ -65,6 +65,8 @@ try {
             Write-PinyonEvent tools 37 ('The title update is installed. Your existing base-disc saves stay on the base ' +
                 'disc until you choose "Use v4" in the launcher; v4 saves cannot go back.') -JsonEvents:$JsonEvents
         }
+        # 1000 Club needs the closed Forza server unless its goals are confirmed locally (TU-7).
+        [void](& $manage -Action club-on -StateRoot $StateRoot)
     }
 }
 catch {

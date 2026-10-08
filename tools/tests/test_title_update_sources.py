@@ -317,13 +317,14 @@ class SetupTitleUpdateTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue(calls[0].startswith("fetch --state-root"))
         self.assertIn("--json-events", calls[0])
-        self.assertEqual(calls[1:], ["manage status", "manage enable"])
+        self.assertEqual(calls[1:], ["manage status", "manage enable", "manage club-on"])
         self.assertIn("::pinyon::", result.stdout)
 
     def test_eu_with_base_saves_leaves_the_choice_to_the_player(self):
         result, calls = self.run_step("4000D145", "EUR", profiles='{"E0000ABCD": "base"}')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertNotIn("manage enable", calls)
+        self.assertIn("manage club-on", calls)
         self.assertIn("existing", result.stdout)
 
     def test_usa_downloads_but_keeps_the_base_build(self):

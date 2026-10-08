@@ -445,6 +445,8 @@ def install_folder(source: Path, state: Path, extractor: Path) -> dict:
         try:
             import_content(path, state, extractor)
         except (ValueError, zipfile.BadZipFile) as error:
+            if str(error).startswith("close the game"):
+                raise  # Nothing can be installed while the game runs; stop instead of failing every file.
             rows.append(dict(file=str(path), status="skipped", reason=str(error)))
             continue
         rows.append(dict(file=str(path), status="imported" if records() != before else "already installed"))

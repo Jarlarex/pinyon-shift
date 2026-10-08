@@ -87,6 +87,14 @@ class OwnedDlcFolderTests(unittest.TestCase):
         for path, data in self.before.items():
             self.assertEqual(path.read_bytes(), data)
 
+    def test_a_running_game_stops_the_whole_folder_at_once(self):
+        with patch.object(dlc, "catalog", return_value=self.manifest), \
+                patch.object(dlc.subprocess, "check_output", return_value=b'"pinyon_shift.exe","1"'), \
+                patch.object(dlc.subprocess, "run", side_effect=self.extract):
+            with self.assertRaisesRegex(ValueError, "close the game"):
+                dlc.install_folder(self.source, self.state, self.root / "extractor")
+        self.assertFalse(list(self.state.glob("user/**/00000002/*")))
+
     def test_installing_again_changes_nothing(self):
         self.install()
         report = {Path(row["file"]).name: row["status"] for row in self.install()["files"]}
