@@ -39,5 +39,5 @@ Notes:
 
 | Issue | Evidence | Status |
 | --- | --- | --- |
-| The achievements screen reopens every ~150 ms after closing, so the game cannot be resumed | Session `20261008T172437Z`: repeating `xam.dialog.open kind=achievements` → `hostui.open` → `hostui.closed` until a forced exit | Open: suspected key state crossing the host UI's input drain (`HostUi::InputReleased`); avoid the in-game Achievements entry until fixed |
-| Visual artifacts when driving fast | Player report; the session had no dropped draws (`skips={}`) and no shader-pack misses | Open: needs a description or screenshot |
+| The achievements screen reopens every ~150 ms after closing, so the game cannot be resumed | Session `20261008T172437Z`: repeating `xam.dialog.open kind=achievements` → `hostui.open` → `hostui.closed` until a forced exit | Fixed in `8e40e24`: the host UI swallowed the release of the key that chose Achievements, so the keyboard emulation kept it held. Needs a manual keyboard check (scripted routes drive the pad) |
+| Visual artifacts when driving fast | Player report. Same session: no dropped draws (`skips={}`), no shader-pack misses; frame time median 8.3 ms, p99 20 ms, 81 frames over 100 ms (max 1.4 s), consistent with first-use shader translation before shader preparation worked (`5cf0740`); peak VRAM 1.3 GB of a 7.1 GB budget | Open: recheck after preparation; needs a description or screenshot if it is not stutter |
