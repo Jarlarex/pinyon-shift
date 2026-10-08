@@ -38,6 +38,53 @@ function Resolve-PinyonLocalPath {
     $full
 }
 
+# Builds the pinned standalone ReXGlue generator that every game build
+# configures against (cmake/PinyonShiftRexGlue.cmake), and returns its path.
+# Shared by build-preview.ps1 and build-v4.ps1; a current build is a no-op.
+function Invoke-PinyonCodeGeneratorBuild {
+    param(
+        [Parameter(Mandatory)] $Environment,
+        [Parameter(Mandatory)] [int]$Parallel,
+        [Parameter(Mandatory)] [string]$LogDirectory,
+        # Consumer build trees to configure afresh if their folder moved.
+        [string[]]$BuildTrees = @(),
+        [switch]$JsonEvents
+    )
+    $root = Get-PinyonRepoRoot
+    $sdkRoot = Resolve-PinyonRexGlueRoot
+    $rexglueExe = Join-Path $sdkRoot 'out/win-amd64/Release/rexglue.exe'
+    Write-PinyonEvent build 62 'Building the local code generator.' -JsonEvents:$JsonEvents
+    $memoryBytes = Get-PinyonTotalMemoryBytes
+    $memoryText = if ($memoryBytes -gt 0) { ", $([Math]::Round($memoryBytes / 1GB)) GB memory" } else { '' }
+    Write-PinyonEvent build 62 "Compiling with $Parallel parallel jobs ($([Environment]::ProcessorCount) logical processors$memoryText)." -JsonEvents:$JsonEvents
+    # A folder moved since the last build (a portable install) is configured afresh.
+    foreach ($buildTree in @((Join-Path $sdkRoot 'out/build/win-amd64')) + $BuildTrees) {
+        if (Reset-PinyonRelocatedCMakeCache -BuildDirectory $buildTree) {
+            Write-PinyonEvent build 62 "The build folder moved; configuring $buildTree again." -JsonEvents:$JsonEvents
+        }
+    }
+    Push-Location $sdkRoot
+    try {
+        Invoke-PinyonBuildCommand $Environment.CMake @('--preset', 'win-amd64',
+            '-DREXGLUE_ENABLE_TRACY=OFF', '-DSDL_HIDAPI_LIBUSB=OFF') `
+            (Join-Path $LogDirectory 'rexglue-configure.log') 'ReXGlue configuration failed.' -Step 'Configure the ReXGlue code generator'
+        Invoke-PinyonBuildCommand $Environment.CMake @('--build', '--preset', 'win-amd64-release',
+            '--target', 'rexglue', '--parallel', "$Parallel") `
+            (Join-Path $LogDirectory 'rexglue-build.log') 'ReXGlue code-generator build failed.' -Step 'Build the ReXGlue code generator'
+    }
+    finally { Pop-Location }
+    # The pinned CLI uses narrow argv and file APIs. UTF-8 process code pages keep
+    # Unicode installation paths intact on Windows 10 1903 and newer.
+    Invoke-PinyonBuildCommand 'mt.exe' @('-nologo', "-inputresource:$rexglueExe;#1",
+        '-manifest', (Join-Path $root 'config/rexglue/codegen-windows.manifest'),
+        "-outputresource:$rexglueExe;#1") (Join-Path $LogDirectory 'rexglue-manifest.log') `
+        'Could not enable Unicode paths for the code generator.' -Step 'Configure code generator Unicode paths'
+    if (-not (Test-Path -LiteralPath $rexglueExe -PathType Leaf)) {
+        throw "The ReXGlue code generator was not produced: $rexglueExe"
+    }
+    $rexglueExe
+}
+
 # The extracted disc of the last completed setup (setup-state.json game_root),
 # else the USA default. Each supported disc revision has its own game root.
 function Get-PinyonDefaultGameRoot {

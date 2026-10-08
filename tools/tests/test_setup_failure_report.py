@@ -426,7 +426,11 @@ class SetupFailureContractTests(unittest.TestCase):
 
     def test_every_native_build_step_is_named(self):
         build = (ROOT / "tools/build-preview.ps1").read_text(encoding="utf-8")
-        calls = build.split("Invoke-PinyonBuildCommand")[1:]
+        common = (ROOT / "tools/release-common.ps1").read_text(encoding="utf-8").replace("\r\n", "\n")
+        generator = common[common.index("function Invoke-PinyonCodeGeneratorBuild"):]
+        generator = generator[:generator.index("\n}\n")]
+        # build-preview.ps1's own steps plus the shared generator build's.
+        calls = build.split("Invoke-PinyonBuildCommand")[1:] + generator.split("Invoke-PinyonBuildCommand")[1:]
         self.assertGreaterEqual(len(calls), 4)
         for call in calls:
             # Each call statement ends before the next line that starts code.

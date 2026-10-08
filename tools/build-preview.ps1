@@ -67,35 +67,8 @@ if ($gameXexInfo.Length -ne [int64]$supportedXex.size_bytes -or
 $guestPatchPath = Join-Path $root 'config/rexglue/analysis/fh1-post-processing.toml'
 $guestPatchSetSha256 = (Get-FileHash -LiteralPath $guestPatchPath -Algorithm SHA256).Hash
 
-Write-PinyonEvent build 62 'Building the local code generator.' -JsonEvents:$JsonEvents
-$memoryBytes = Get-PinyonTotalMemoryBytes
-$memoryText = if ($memoryBytes -gt 0) { ", $([Math]::Round($memoryBytes / 1GB)) GB memory" } else { '' }
-Write-PinyonEvent build 62 "Compiling with $Parallel parallel jobs ($([Environment]::ProcessorCount) logical processors$memoryText)." -JsonEvents:$JsonEvents
-# A folder moved since the last build (a portable install) is configured afresh.
-foreach ($buildTree in @((Join-Path $sdkRoot 'out/build/win-amd64'), (Join-Path $root "out/build/$previewPreset"))) {
-    if (Reset-PinyonRelocatedCMakeCache -BuildDirectory $buildTree) {
-        Write-PinyonEvent build 62 "The build folder moved; configuring $buildTree again." -JsonEvents:$JsonEvents
-    }
-}
-Push-Location $sdkRoot
-try {
-    Invoke-PinyonBuildCommand $environment.CMake @('--preset', 'win-amd64',
-        '-DREXGLUE_ENABLE_TRACY=OFF', '-DSDL_HIDAPI_LIBUSB=OFF') `
-        (Join-Path $logs 'rexglue-configure.log') 'ReXGlue configuration failed.' -Step 'Configure the ReXGlue code generator'
-    Invoke-PinyonBuildCommand $environment.CMake @('--build', '--preset', 'win-amd64-release',
-        '--target', 'rexglue', '--parallel', "$Parallel") `
-        (Join-Path $logs 'rexglue-build.log') 'ReXGlue code-generator build failed.' -Step 'Build the ReXGlue code generator'
-}
-finally { Pop-Location }
-# The pinned CLI uses narrow argv and file APIs. UTF-8 process code pages keep
-# Unicode installation paths intact on Windows 10 1903 and newer.
-Invoke-PinyonBuildCommand 'mt.exe' @('-nologo', "-inputresource:$rexglueExe;#1",
-    '-manifest', (Join-Path $root 'config/rexglue/codegen-windows.manifest'),
-    "-outputresource:$rexglueExe;#1") (Join-Path $logs 'rexglue-manifest.log') `
-    'Could not enable Unicode paths for the code generator.' -Step 'Configure code generator Unicode paths'
-if (-not (Test-Path -LiteralPath $rexglueExe -PathType Leaf)) {
-    throw "The ReXGlue code generator was not produced: $rexglueExe"
-}
+[void](Invoke-PinyonCodeGeneratorBuild -Environment $environment -Parallel $Parallel -LogDirectory $logs `
+    -BuildTrees @((Join-Path $root "out/build/$previewPreset")) -JsonEvents:$JsonEvents)
 
 Write-PinyonEvent build 72 'Translating the verified game code locally.' -JsonEvents:$JsonEvents
 $generatedTrees = @('default', 'speech', 'xmedia')

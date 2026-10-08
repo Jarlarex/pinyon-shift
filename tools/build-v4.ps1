@@ -45,6 +45,10 @@ $environment = Enter-PinyonBuildEnvironment
 $logs = Resolve-PinyonLocalPath -RelativePath '.local/logs'
 [void](New-Item -ItemType Directory -Force -Path $logs)
 if ($Parallel -eq 0) { $Parallel = Get-PinyonBuildJobCount }
+# A disc built only with its update (the EU disc) never ran build-preview.ps1, which used to
+# be the only place the generator was built.
+[void](Invoke-PinyonCodeGeneratorBuild -Environment $environment -Parallel $Parallel -LogDirectory $logs `
+    -BuildTrees @((Join-Path $root 'out/build/win-amd64-v4')))
 Invoke-PinyonBuildCommand $environment.CMake @('--preset', 'win-amd64-v4',
     "-DPYTHON_EXECUTABLE=$(Get-PinyonPython)") `
     (Join-Path $logs 'v4-configure.log') 'v4 configuration failed.' -Step 'Configure the v4 build'

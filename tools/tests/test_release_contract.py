@@ -279,7 +279,8 @@ catch { [Console]::Error.Write($_.Exception.Message); exit 2 }
 
     def test_rexglue_downloads_retry_and_windows_skips_optional_libusb(self):
         prepare = (ROOT / "tools/prepare-rexglue.ps1").read_text(encoding="utf-8")
-        build = (ROOT / "tools/build-preview.ps1").read_text(encoding="utf-8")
+        # The generator configure step lives in release-common.ps1, shared by build-preview and build-v4.
+        build = (ROOT / "tools/release-common.ps1").read_text(encoding="utf-8")
         cmake = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
 
         self.assertIn("function Invoke-PinyonGitWithRetry", prepare)

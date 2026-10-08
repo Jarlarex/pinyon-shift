@@ -165,12 +165,16 @@ class RelocatedBuildTreeTests(unittest.TestCase):
             self.assertEqual(self.reset(pathlib.Path(directory) / "absent"), "False")
 
     def test_build_preview_checks_both_trees_before_configuring(self):
+        # The generator build (shared with build-v4.ps1) checks the SDK tree and the trees it is given.
+        common = read("tools/release-common.ps1")
+        generator = common[common.index("function Invoke-PinyonCodeGeneratorBuild"):]
+        check = generator.index("Reset-PinyonRelocatedCMakeCache -BuildDirectory $buildTree")
+        self.assertIn("(Join-Path $sdkRoot 'out/build/win-amd64')", generator)
+        self.assertLess(check, generator.index("'--preset', 'win-amd64'"))
         build = read("tools/build-preview.ps1")
-        check = build.index("Reset-PinyonRelocatedCMakeCache -BuildDirectory $buildTree")
-        self.assertIn("(Join-Path $sdkRoot 'out/build/win-amd64')", build)
-        self.assertIn("(Join-Path $root \"out/build/$previewPreset\")", build)
-        self.assertLess(check, build.index("'--preset', 'win-amd64'"))
-        self.assertLess(check, build.index("'--preset', $previewPreset"))
+        call = build.index("Invoke-PinyonCodeGeneratorBuild")
+        self.assertIn("-BuildTrees @((Join-Path $root \"out/build/$previewPreset\"))", build)
+        self.assertLess(call, build.index("'--preset', $previewPreset"))
 
 
 if __name__ == "__main__":
