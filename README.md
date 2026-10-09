@@ -53,10 +53,11 @@ on a console. For example, the Rally Expansion's 2003 Ford Focus SVT needs the
 Season Pass licence inside the Rally package, and a package without a licence
 shows none of its cars. Within this project, packages and their licence masks
 may be changed or modified so that the content runs. Two cars rely on this:
-the Mustang Boss 302 Pizza Hut gets `00000001` from a licence grant in
-`config/supported-dlc.json`, and the Focus SVT gets the Season Pass bit from
-the licence of a corrupt Rally copy imported beside the verified one (that
-copy's files are never installed).
+licence grants in `config/supported-dlc.json` give the Mustang Boss 302 Pizza
+Hut `00000001` and the Rally package the Focus SVT's Season Pass bit
+`00000004`, so the verified Rally copy alone is enough. A corrupt Rally copy's
+licence may still be imported beside it; that copy's files are never
+installed.
 
 ## Requirements
 

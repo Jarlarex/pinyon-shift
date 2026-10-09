@@ -187,6 +187,10 @@
       "payload_sha256": "B9C0D77E8E7EDF8E9EB5C8CCEE75A9BF7290768B2A6350AC2C8E9613D6BE2E6C",
       "file_count": 452,
       "expanded_size": 1075358327,
+      "license_grant": {
+        "mask": "00000004",
+        "reason": "The accepted copy licenses only 00000001; the Season Pass offer 4D5309C971D3C000 (car 346, 2003 Ford Focus SVT) needs ContentOffers.LicenseMask 00000004."
+      },
       "accepted": [
         {
           "size": 1083125760,

@@ -144,14 +144,16 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(mustang["accepted"][0]["license_mask"], "00000000")
         self.assertEqual(mustang["license_grant"]["mask"], "00000001")
 
-    def test_rally_corrupt_copy_supplies_only_its_licence(self):
+    def test_rally_verified_copy_alone_reaches_the_focus_svt(self):
         catalog = json.loads((ROOT / "config/supported-dlc.json").read_text(encoding="utf-8"))
         rally = next(p for p in catalog["packages"] if p["package_id"] == "6F6992766050D818245ADD408031E280FB5F4E634D")
-        corrupt = next(v for v in rally["rejected"] if v["sha256"].startswith("AA7BD510"))
-        # Its licence covers the season-pass Focus SVT (offer mask 00000004).
-        self.assertTrue(corrupt["license_only"])
-        self.assertEqual(int(corrupt["license_mask"], 16) & 4, 4)
+        # The season-pass Focus SVT's offer needs 00000004, which the
+        # verified copy lacks; the grant supplies it.
         self.assertEqual([v["license_mask"] for v in rally["accepted"]], ["00000001"])
+        self.assertEqual(dlc.combined_mask(rally, rally["accepted"]), "00000005")
+        # The corrupt copy may still add its licence, never its files.
+        corrupt = next(v for v in rally["rejected"] if v["sha256"].startswith("AA7BD510"))
+        self.assertTrue(corrupt["license_only"])
 
     def test_catalog_licence_grants_are_explicit(self):
         catalog = json.loads((ROOT / "config/supported-dlc.json").read_text(encoding="utf-8"))
