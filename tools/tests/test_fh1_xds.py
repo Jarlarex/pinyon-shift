@@ -160,5 +160,52 @@ class BlockTests(unittest.TestCase):
             xds.read_blocks(head + bytes(0x4000))
 
 
+def texels(rgba, width, x, y):
+    return tuple(rgba[4 * (y * width + x):4 * (y * width + x) + 4])
+
+
+class DecodeTests(unittest.TestCase):
+    def test_dxt1_opaque_block_interpolates_two_thirds(self):
+        head = header(4, 4, DXT1, 1, 0, packed=False)
+        block = struct.pack("<HHI", 0xF800, 0x001F, 0b11_10_01_00)  # red, blue; texels 0-3 use indices 0-3
+        rgba = xds.decode_levels(xds.write_blocks(head, [block]))[0]
+        self.assertEqual([texels(rgba, 4, x, 0) for x in range(4)],
+                         [(255, 0, 0, 255), (0, 0, 255, 255), (170, 0, 85, 255), (85, 0, 170, 255)])
+
+    def test_dxt1_block_with_smaller_first_colour_has_a_transparent_texel(self):
+        head = header(4, 4, DXT1, 1, 0, packed=False)
+        block = struct.pack("<HHI", 0x001F, 0xF800, 0b11_10)  # texel 0: index 2 (middle), texel 1: index 3
+        rgba = xds.decode_levels(xds.write_blocks(head, [block]))[0]
+        self.assertEqual(texels(rgba, 4, 0, 0), (128, 0, 128, 255))
+        self.assertEqual(texels(rgba, 4, 1, 0), (0, 0, 0, 0))
+
+    def test_dxt5_alpha_uses_eight_steps_when_the_first_endpoint_is_larger(self):
+        head = header(4, 4, DXT5, 1, 0, packed=False)
+        indices = sum(i << (3 * i) for i in range(8))  # texels 0-7 take alpha indices 0-7
+        alpha = bytes([255, 0]) + indices.to_bytes(6, "little")
+        rgba = xds.decode_levels(xds.write_blocks(head, [alpha + struct.pack("<HHI", 0xFFFF, 0xFFFF, 0)]))[0]
+        self.assertEqual([texels(rgba, 4, x % 4, x // 4)[3] for x in range(8)],
+                         [255, 0, 219, 182, 146, 109, 73, 36])
+
+    def test_dxt5_alpha_six_step_mode_ends_in_zero_and_full(self):
+        head = header(4, 4, DXT5, 1, 0, packed=False)
+        indices = (6 << 0) | (7 << 3)
+        alpha = bytes([0, 255]) + indices.to_bytes(6, "little")
+        rgba = xds.decode_levels(xds.write_blocks(head, [alpha + struct.pack("<HHI", 0, 0, 0)]))[0]
+        self.assertEqual((texels(rgba, 4, 0, 0)[3], texels(rgba, 4, 1, 0)[3]), (0, 255))
+
+    def test_every_mip_level_decodes_at_its_own_size(self):
+        head = header(8, 8, DXT5, 4, 0x4)
+        layout = xds.layout(head)
+        rgba = xds.decode_levels(xds.write_blocks(head, distinct_blocks(layout)))
+        self.assertEqual([len(level) for level in rgba], [8 * 8 * 4, 4 * 4 * 4, 2 * 2 * 4, 4])
+
+    def test_png_holds_the_decoded_level(self):
+        png = xds.encode_png(2, 1, bytes([1, 2, 3, 4, 5, 6, 7, 8]))
+        self.assertEqual(png[:8], b"\x89PNG\r\n\x1a\n")
+        self.assertEqual(struct.unpack(">II", png[16:24]), (2, 1))
+        self.assertEqual(xds.decode_png(png), (2, 1, bytes([1, 2, 3, 4, 5, 6, 7, 8])))
+
+
 if __name__ == "__main__":
     unittest.main()

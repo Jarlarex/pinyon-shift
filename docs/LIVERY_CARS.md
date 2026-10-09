@@ -10,7 +10,7 @@ No game files, generated cars or livery art are committed; livery art lives in
 
 | Module | Tool | State |
 |---|---|---|
-| `xds-codec` | `tools/fh1_xds.py` | layout and block read/write done |
+| `xds-codec` | `tools/fh1_xds.py` | layout, block read/write and decode done |
 | `car-clone` | `tools/clone-fh1-car.py` | planned |
 | `livery-paint`, `livery-package`, `promo-cars` | — | planned |
 
