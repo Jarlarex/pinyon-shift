@@ -1,5 +1,7 @@
 """FH1 .xds car texture codec, with synthetic headers only (no game data)."""
+import contextlib
 import importlib.util
+import io
 import struct
 import unittest
 from pathlib import Path
@@ -147,6 +149,13 @@ class BlockTests(unittest.TestCase):
         result = xds.roundtrip(data)
         self.assertEqual((result["byte_exact"], result["differing_bytes"]), (True, 0))
 
+    def test_roundtrip_can_measure_reencoding(self):
+        head = header(64, 64, DXT5, 7, 0x4)
+        rgba = b"".join(bytes((x * 4, y * 4, 128, 255)) for y in range(64) for x in range(64))
+        result = xds.roundtrip(xds.write_xds(head, rgba, 64, 64), encode=True)
+        self.assertLessEqual(result["reencode_mean"], 3)
+        self.assertIn("encode_seconds", result)
+
     def test_roundtrip_reports_bytes_outside_every_level(self):
         head = header(128, 16, DXT5, 1, 0, packed=False)
         data = bytearray(xds.write_blocks(head, distinct_blocks(xds.layout(head))))
@@ -205,6 +214,102 @@ class DecodeTests(unittest.TestCase):
         self.assertEqual(png[:8], b"\x89PNG\r\n\x1a\n")
         self.assertEqual(struct.unpack(">II", png[16:24]), (2, 1))
         self.assertEqual(xds.decode_png(png), (2, 1, bytes([1, 2, 3, 4, 5, 6, 7, 8])))
+
+
+def encode_and_decode(texels, format="DXT5"):
+    """Encode one 4x4 block of RGBA tuples and decode it again."""
+    head = header(4, 4, DXT5 if format == "DXT5" else DXT1, 1, 0, packed=False)
+    return xds.decode_levels(xds.write_xds(head, b"".join(bytes(t) for t in texels), 4, 4))[0]
+
+
+def worst(decoded, texels):
+    return max(abs(decoded[4 * i + c] - texels[i][c]) for i in range(16) for c in range(4))
+
+
+class EncodeTests(unittest.TestCase):
+    def test_flat_colour_that_565_can_hold_is_exact(self):
+        texels = [(255, 0, 0, 255)] * 16
+        self.assertEqual(worst(encode_and_decode(texels), texels), 0)
+
+    def test_flat_colour_is_within_565_rounding(self):
+        texels = [(200, 101, 50, 255)] * 16
+        self.assertLessEqual(worst(encode_and_decode(texels), texels), 4)
+
+    def test_two_colour_block_is_exact(self):
+        texels = [(255, 0, 0, 255)] * 8 + [(0, 0, 255, 255)] * 8
+        self.assertEqual(worst(encode_and_decode(texels), texels), 0)
+
+    def test_four_step_ramp_on_the_palette_line_is_exact(self):
+        texels = [(v, v, v, 255) for v in (0, 85, 170, 255) for _ in range(4)]
+        self.assertEqual(worst(encode_and_decode(texels), texels), 0)
+
+    def test_sixteen_step_ramp_stays_near_the_palettes_limit(self):
+        # Four palette entries cannot hold 16 greys; the best fit averages about 19.
+        texels = [(16 * i, 16 * i, 16 * i, 255) for i in range(16)]
+        decoded = encode_and_decode(texels)
+        self.assertLessEqual(sum(abs(decoded[4 * i] - texels[i][0]) for i in range(16)) / 16, 21)
+
+    def test_alpha_ramp_lands_on_the_nearest_palette_step(self):
+        texels = [(255, 255, 255, 17 * i) for i in range(16)]
+        decoded = encode_and_decode(texels)
+        self.assertLessEqual(max(abs(decoded[4 * i + 3] - texels[i][3]) for i in range(16)), 19)
+
+    def test_dxt1_two_colour_block_is_exact(self):
+        texels = [(0, 255, 0, 255)] * 8 + [(255, 255, 255, 255)] * 8
+        self.assertEqual(worst(encode_and_decode(texels, "DXT1"), texels), 0)
+
+    def test_dxt1_block_of_two_colours_and_their_midpoint_is_exact(self):
+        # Only DXT1's three-colour mode holds an exact midpoint (stock interior textures use it).
+        texels = [(0, 0, 0, 255)] * 6 + [(128, 128, 128, 255)] * 4 + [(255, 255, 255, 255)] * 6
+        self.assertEqual(worst(encode_and_decode(texels, "DXT1"), texels), 0)
+
+    def test_dxt1_cut_out_texels_stay_transparent(self):
+        texels = [(255, 0, 0, 255)] * 8 + [(0, 0, 0, 0)] * 8
+        decoded = encode_and_decode(texels, "DXT1")
+        self.assertEqual([decoded[4 * i + 3] for i in range(16)], [255] * 8 + [0] * 8)
+
+    def test_mips_of_flat_quadrants_keep_their_colours(self):
+        quadrant = {(0, 0): (255, 0, 0, 255), (1, 0): (0, 255, 0, 255),
+                    (0, 1): (0, 0, 255, 255), (1, 1): (255, 255, 255, 255)}
+        rgba = b"".join(bytes(quadrant[(x // 4, y // 4)]) for y in range(8) for x in range(8))
+        mip = xds.make_mips(rgba, 8, 8, [(4, 4)])[0]
+        self.assertEqual([texels(mip, 4, x, y) for x, y in ((0, 0), (3, 0), (0, 3), (3, 3))],
+                         [(255, 0, 0, 255), (0, 255, 0, 255), (0, 0, 255, 255), (255, 255, 255, 255)])
+
+    def test_mips_average_in_linear_light(self):
+        checker = b"".join(bytes((255,) * 3 + (255,)) if (x + y) % 2 else bytes((0, 0, 0, 255))
+                           for y in range(2) for x in range(2))
+        grey = xds.make_mips(checker, 2, 2, [(1, 1)])[0]
+        self.assertGreater(grey[0], 170)  # a gamma-space average would give 128
+        self.assertEqual(grey[3], 255)
+
+    def test_write_xds_fills_every_level_of_a_stock_shaped_texture(self):
+        head = header(64, 64, DXT5, 7, 0x4)
+        rgba = b"".join(bytes((x * 4, y * 4, 128, 255)) for y in range(64) for x in range(64))
+        data = xds.write_xds(head, rgba, 64, 64)
+        self.assertEqual(len(data), xds.HEADER_SIZE + xds.layout(head).data_size)
+        levels = xds.decode_levels(data)
+        self.assertEqual([len(level) // 4 for level in levels], [4096, 1024, 256, 64, 16, 4, 1])
+        self.assertLessEqual(sum(abs(a - b) for a, b in zip(levels[0], rgba)) / len(rgba), 3)
+
+    def test_write_xds_refuses_an_image_of_another_size(self):
+        with self.assertRaisesRegex(ValueError, "64x64"):
+            xds.write_xds(header(64, 64, DXT5, 7, 0x4), bytes(32 * 32 * 4), 32, 32)
+
+    def test_encode_command_writes_a_texture_from_a_png(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            head = header(8, 8, DXT5, 4, 0x4)
+            (root / "template.xds").write_bytes(xds.write_blocks(head, distinct_blocks(xds.layout(head))))
+            (root / "in.png").write_bytes(xds.encode_png(8, 8, bytes([10, 20, 30, 255]) * 64))
+            with contextlib.redirect_stdout(io.StringIO()):
+                status = xds.main(["encode", str(root / "template.xds"), str(root / "in.png"), str(root / "out.xds")])
+            self.assertEqual(status, 0)
+            out = (root / "out.xds").read_bytes()
+            self.assertEqual(out[:xds.HEADER_SIZE], head)
+            self.assertLessEqual(max(abs(a - b) for a, b in zip(xds.decode_levels(out)[0],
+                                                                 bytes([10, 20, 30, 255]) * 64)), 4)
 
 
 if __name__ == "__main__":

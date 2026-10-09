@@ -10,7 +10,7 @@ No game files, generated cars or livery art are committed; livery art lives in
 
 | Module | Tool | State |
 |---|---|---|
-| `xds-codec` | `tools/fh1_xds.py` | layout, block read/write and decode done |
+| `xds-codec` | `tools/fh1_xds.py` | layout, read/write, decode and encode done; in-game check pending |
 | `car-clone` | `tools/clone-fh1-car.py` | planned |
 | `livery-paint`, `livery-package`, `promo-cars` | — | planned |
 
@@ -28,8 +28,15 @@ blocks (4,0), (2,0) and (1,0). The SDK's `GetPackedTileOffset`
 (`texture/info.cpp`) computes per level with a fixed 16-texel step and agrees only
 for square textures, which is every body texture.
 
+Encoding picks DXT endpoints from each block's principal colour axis with one
+least-squares pass; opaque DXT1 blocks also try the three-colour mode, whose
+exact midpoint some stock interior textures use. Mips are box-filtered in linear
+light. Identical blocks are encoded once, so large flat paint areas cost little.
+
 ```powershell
-python tools\fh1_xds.py roundtrip <file.xds> [...]   # layout check, one JSON line per file
+python tools\fh1_xds.py roundtrip [--encode] <file.xds> [...]  # layout check (+ re-encode error and time)
+python tools\fh1_xds.py decode <file.xds> <out.png> [--level N]
+python tools\fh1_xds.py encode <stock.xds> <in.png> <out.xds>   # header and size come from the stock file
 ```
 
 ### Evidence
@@ -37,3 +44,4 @@ python tools\fh1_xds.py roundtrip <file.xds> [...]   # layout check, one JSON li
 | Date | Check | Result |
 |---|---|---|
 | 2026-10-09 | `roundtrip` on every `.xds` of the stock Challenger SRT8 392 (1557, disc), Scion FR-S (1548, disc) and Mustang Boss 302 (1569, October Car Pack) | 60 textures: **54 DXT1/DXT5 byte-exact** (2048², 1024², 512², 128², 64² and non-square 220×100, 150×40, 128×64, 120×40, 128×16, 64×16, 32×16); 6 normal maps (format 49) skipped by design |
+| 2026-10-09 | `roundtrip --encode` (decode level 0, re-encode with mips, decode again) on the same 54 textures | level-0 error: worst mean **1.16/255**, worst max **33/255** (spec: 3 and 48); a 2048² texture with 12 levels in **5–21 s**; a car's body textures (incl. the stock colour variants) in 47–83 s (spec: 90 s per texture, 5 min per car) |

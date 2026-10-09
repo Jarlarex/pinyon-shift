@@ -18,6 +18,7 @@ one whose smaller side is 16 texels or less share one packed tile.
 # when tools load this file by path (importlib), where string annotations fail.
 import struct
 import sys
+import time
 import zlib
 from dataclasses import dataclass
 
@@ -306,17 +307,216 @@ def decode_png(data: bytes) -> tuple[int, int, bytes]:
     return width, height, b"".join(rows)
 
 
-def roundtrip(data: bytes) -> dict:
+# Car textures are gamma-encoded (header gamma bits); mips average in linear light.
+_TO_LINEAR = [(value / 255) ** 2.2 for value in range(256)]
+
+
+def _to_gamma(linear: float) -> int:
+    return min(255, max(0, round(linear ** (1 / 2.2) * 255)))
+
+
+def _downsample(rgba: bytes, width: int, height: int, out_width: int, out_height: int) -> bytes:
+    """Box filter: each output texel averages the source texels that map onto it."""
+    out = bytearray(out_width * out_height * 4)
+    linear = _TO_LINEAR
+    for dy in range(out_height):
+        y0 = dy * height // out_height
+        y1 = max(y0 + 1, (dy + 1) * height // out_height)
+        for dx in range(out_width):
+            x0 = dx * width // out_width
+            x1 = max(x0 + 1, (dx + 1) * width // out_width)
+            red = green = blue = alpha = 0.0
+            for y in range(y0, y1):
+                row = y * width * 4
+                for x in range(x0, x1):
+                    at = row + 4 * x
+                    red += linear[rgba[at]]
+                    green += linear[rgba[at + 1]]
+                    blue += linear[rgba[at + 2]]
+                    alpha += rgba[at + 3]
+            count = (y1 - y0) * (x1 - x0)
+            at = 4 * (dy * out_width + dx)
+            out[at:at + 4] = bytes((_to_gamma(red / count), _to_gamma(green / count),
+                                    _to_gamma(blue / count), round(alpha / count)))
+    return bytes(out)
+
+
+def make_mips(rgba: bytes, width: int, height: int, sizes: list[tuple[int, int]]) -> list[bytes]:
+    """Each requested mip size, filtered from the previous level."""
+    levels = []
+    for out_width, out_height in sizes:
+        rgba = _downsample(rgba, width, height, out_width, out_height)
+        width, height = out_width, out_height
+        levels.append(rgba)
+    return levels
+
+
+def _pack565(color: tuple[float, float, float]) -> int:
+    red, green, blue = (min(255.0, max(0.0, c)) for c in color)
+    return (round(red * 31 / 255) << 11) | (round(green * 63 / 255) << 5) | round(blue * 31 / 255)
+
+
+def _expand565(color: int) -> tuple[int, int, int]:
+    red, green, blue = color >> 11, (color >> 5) & 0x3F, color & 0x1F
+    return (red << 3 | red >> 2, green << 2 | green >> 4, blue << 3 | blue >> 2)
+
+
+def _principal_ends(colors: list[tuple[int, int, int]]) -> tuple[tuple[float, ...], tuple[float, ...]]:
+    """The two extreme colours along the block's principal axis."""
+    count = len(colors)
+    mean = [sum(c[i] for c in colors) / count for i in range(3)]
+    cov = [[sum((c[i] - mean[i]) * (c[j] - mean[j]) for c in colors) for j in range(3)] for i in range(3)]
+    # Start from the colour farthest from the mean: never perpendicular to the spread.
+    offsets = [[c[i] - mean[i] for i in range(3)] for c in colors]
+    axis = max(offsets, key=lambda v: v[0] * v[0] + v[1] * v[1] + v[2] * v[2])
+    if max(abs(v) for v in axis) < 1e-9:
+        return tuple(mean), tuple(mean)
+    for _ in range(6):
+        turned = [sum(cov[i][j] * axis[j] for j in range(3)) for i in range(3)]
+        norm = max(abs(v) for v in turned)
+        if norm < 1e-9:
+            break
+        axis = [v / norm for v in turned]
+    projections = [sum((c[i] - mean[i]) * axis[i] for i in range(3)) for c in colors]
+    return tuple(colors[projections.index(max(projections))]), tuple(colors[projections.index(min(projections))])
+
+
+def _palette(color0: int, color1: int, four: bool) -> list[tuple[int, int, int]]:
+    first, second = _expand565(color0), _expand565(color1)
+    if four:
+        return [first, second, tuple((2 * a + b + 1) // 3 for a, b in zip(first, second)),
+                tuple((a + 2 * b + 1) // 3 for a, b in zip(first, second))]
+    return [first, second, tuple((a + b + 1) // 2 for a, b in zip(first, second))]
+
+
+def _nearest(colors, palette) -> tuple[list[int], int]:
+    indices, error = [], 0
+    for color in colors:
+        distances = [sum((a - b) ** 2 for a, b in zip(color, entry)) for entry in palette]
+        best = min(distances)
+        indices.append(distances.index(best))
+        error += best
+    return indices, error
+
+
+def _fit_colors(colors: list[tuple[int, int, int]], four: bool) -> tuple[int, int, list[int], int]:
+    """565 endpoints, per-colour palette indices and squared error: principal-axis
+    ends, then one least-squares pass."""
+    start, end = _principal_ends(colors)
+    best = None
+    for _ in range(2):
+        color0, color1 = _pack565(start), _pack565(end)
+        if four and color0 < color1:
+            color0, color1 = color1, color0
+        elif not four and color0 > color1:
+            color0, color1 = color1, color0
+        indices, error = _nearest(colors, _palette(color0, color1, four))
+        if best is None or error < best[3]:
+            best = (color0, color1, indices, error)
+        weights = ((1, 0), (0, 1), (2 / 3, 1 / 3), (1 / 3, 2 / 3)) if four else ((1, 0), (0, 1), (0.5, 0.5))
+        aa = sum(weights[i][0] ** 2 for i in indices)
+        ab = sum(weights[i][0] * weights[i][1] for i in indices)
+        bb = sum(weights[i][1] ** 2 for i in indices)
+        det = aa * bb - ab * ab
+        if abs(det) < 1e-9:
+            break
+        ax = [sum(weights[i][0] * c[k] for i, c in zip(indices, colors)) for k in range(3)]
+        bx = [sum(weights[i][1] * c[k] for i, c in zip(indices, colors)) for k in range(3)]
+        start = tuple((bb * ax[k] - ab * bx[k]) / det for k in range(3))
+        end = tuple((aa * bx[k] - ab * ax[k]) / det for k in range(3))
+    return best
+
+
+def _encode_alpha(alphas: list[int]) -> bytes:
+    high, low = max(alphas), min(alphas)
+    if high == low:
+        return bytes([high, low]) + bytes(6)
+    palette = [high, low] + [((7 - i) * high + i * low + 3) // 7 for i in range(1, 7)]
+    bits = 0
+    for texel, value in enumerate(alphas):
+        distances = [abs(value - entry) for entry in palette]
+        bits |= distances.index(min(distances)) << (3 * texel)
+    return bytes([high, low]) + bits.to_bytes(6, "little")
+
+
+def _encode_block(format: str, texels: list[tuple[int, int, int, int]]) -> bytes:
+    """One 4x4 block in standard (little-endian) DXT1 or DXT5 byte order."""
+    colors = [t[:3] for t in texels]
+    if format == "DXT5":
+        color0, color1, indices, _ = _fit_colors(colors, four=True)
+        bits = sum(index << (2 * texel) for texel, index in enumerate(indices))
+        return _encode_alpha([t[3] for t in texels]) + struct.pack("<HHI", color0, color1, bits)
+    opaque = [t[3] >= 128 for t in texels]
+    if all(opaque):
+        # Opaque DXT1 blocks may use either mode: thirds (four colours) or an exact midpoint (three).
+        color0, color1, indices, _ = min(_fit_colors(colors, four=True), _fit_colors(colors, four=False),
+                                         key=lambda fit: fit[3])
+        if color0 == color1:
+            indices = [0] * 16
+    elif any(opaque):
+        visible = [c for c, keep in zip(colors, opaque) if keep]
+        color0, color1, fitted, _ = _fit_colors(visible, four=False)
+        fitted = iter(fitted)
+        indices = [next(fitted) if keep else 3 for keep in opaque]
+    else:
+        color0, color1, indices = 0, 0xFFFF, [3] * 16
+    bits = sum(index << (2 * texel) for texel, index in enumerate(indices))
+    return struct.pack("<HHI", color0, color1, bits)
+
+
+def _encode_level(format: str, rgba: bytes, width: int, height: int, cache: dict) -> bytes:
+    """A level's blocks, row by row; edge blocks repeat the last texel row and column."""
+    out = []
+    for by in range(0, height, 4):
+        for bx in range(0, width, 4):
+            if bx + 4 <= width and by + 4 <= height:
+                raw = b"".join(rgba[4 * (y * width + bx):4 * (y * width + bx) + 16] for y in range(by, by + 4))
+            else:
+                spots = [4 * (min(y, height - 1) * width + min(x, width - 1))
+                         for y in range(by, by + 4) for x in range(bx, bx + 4)]
+                raw = b"".join(rgba[at:at + 4] for at in spots)
+            block = cache.get(raw)
+            if block is None:
+                block = _encode_block(format, [tuple(raw[i:i + 4]) for i in range(0, 64, 4)])
+                cache[raw] = block
+            out.append(block)
+    return b"".join(out)
+
+
+def write_xds(template_header: bytes, rgba: bytes, width: int, height: int) -> bytes:
+    """Encode level 0 and generated mips into the layout the (stock) header describes."""
+    texture = layout(template_header)
+    if (width, height) != (texture.width, texture.height) or len(rgba) != width * height * 4:
+        raise ValueError(f"the texture needs a {texture.width}x{texture.height} RGBA image")
+    sizes = [(level.width, level.height) for level in texture.levels[1:]]
+    images = [rgba] + make_mips(rgba, width, height, sizes)
+    cache: dict = {}
+    levels = [_encode_level(texture.format, image, level.width, level.height, cache)
+              for image, level in zip(images, texture.levels)]
+    return write_blocks(template_header, levels)
+
+
+def roundtrip(data: bytes, encode: bool = False) -> dict:
     """Layout check: untile every level and retile it onto zeroed padding; a
-    correct layout reproduces the stock file byte for byte."""
+    correct layout reproduces the stock file byte for byte. With `encode`, also
+    re-encode level 0 (and its mips) and measure level 0's error and the time."""
     texture = layout(data)
     rebuilt = write_blocks(data[:HEADER_SIZE], read_blocks(data))
-    return {"size": f"{texture.width}x{texture.height}", "format": texture.format,
-            "levels": len(texture.levels), "byte_exact": rebuilt == data,
-            "differing_bytes": sum(a != b for a, b in zip(rebuilt, data)) + abs(len(rebuilt) - len(data))}
+    result = {"size": f"{texture.width}x{texture.height}", "format": texture.format,
+              "levels": len(texture.levels), "byte_exact": rebuilt == data,
+              "differing_bytes": sum(a != b for a, b in zip(rebuilt, data)) + abs(len(rebuilt) - len(data))}
+    if encode:
+        original = decode_levels(data)[0]
+        started = time.perf_counter()
+        encoded = write_xds(data[:HEADER_SIZE], original, texture.width, texture.height)
+        seconds = time.perf_counter() - started
+        errors = [abs(a - b) for a, b in zip(decode_levels(encoded)[0], original)]
+        result |= {"reencode_mean": round(sum(errors) / len(errors), 3), "reencode_max": max(errors),
+                   "encode_seconds": round(seconds, 1)}
+    return result
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     import argparse
     import json
     from pathlib import Path
@@ -325,11 +525,21 @@ def main() -> int:
     commands = parser.add_subparsers(dest="command", required=True)
     check = commands.add_parser("roundtrip", help="check that the layout reproduces each texture exactly")
     check.add_argument("files", nargs="+", type=Path)
+    check.add_argument("--encode", action="store_true", help="also re-encode level 0 and report error and time")
+    encode = commands.add_parser("encode", help="encode a PNG into a texture shaped like TEMPLATE")
+    encode.add_argument("template", type=Path)
+    encode.add_argument("input", type=Path)
+    encode.add_argument("output", type=Path)
     decode = commands.add_parser("decode", help="write one mip level as a PNG")
     decode.add_argument("input", type=Path)
     decode.add_argument("output", type=Path)
     decode.add_argument("--level", type=int, default=0)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
+    if args.command == "encode":
+        width, height, rgba = decode_png(args.input.read_bytes())
+        args.output.write_bytes(write_xds(args.template.read_bytes()[:HEADER_SIZE], rgba, width, height))
+        print(json.dumps({"template": str(args.template), "png": str(args.input), "xds": str(args.output)}))
+        return 0
     if args.command == "decode":
         data = args.input.read_bytes()
         level = layout(data).levels[args.level]
@@ -340,7 +550,7 @@ def main() -> int:
     exact = True
     for path in args.files:
         try:
-            result = {"file": str(path)} | roundtrip(path.read_bytes())
+            result = {"file": str(path)} | roundtrip(path.read_bytes(), encode=args.encode)
         except ValueError as error:
             result = {"file": str(path), "skipped": str(error)}
         exact &= result.get("byte_exact", True)
