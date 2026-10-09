@@ -1311,7 +1311,8 @@ def rally_stage_reload_summary(events: list[dict], state: Path, route: int,
 def token_purchase_summary(events: list[dict], state_root: Path, item: int, price: int) -> dict:
     """One offline Token purchase (DLC-7): the offer showed the host balance,
     the purchase paid the price from it and completed the title's transaction,
-    and the private state's balance file holds what was left."""
+    and the balance file in the private state's open save holds what was
+    left."""
     def named(name: str, **fields: str) -> list[dict]:
         return [e for e in events if e.get("event") == name and
                 all(e.get(key) == value for key, value in fields.items())]
@@ -1327,7 +1328,12 @@ def token_purchase_summary(events: list[dict], state_root: Path, item: int, pric
             int(paid[0]["price"]) != price or after != offered - price or
             paid[0].get("state") != "0" or events.index(offers[0]) > events.index(paid[0])):
         raise RuntimeError("the Token purchase did not pay the offered balance")
-    path = state_root / "user" / "pinyon_shift_tokens.toml"
+    # The game reports the save's folder as an extended-length Windows path.
+    path = Path(str(loaded[0].get("path", "")).removeprefix("\\\\?\\"))
+    if (path.name != "pinyon_shift_tokens.toml" or path.parent.name != "ForzaProfile" or
+            not any(path.resolve().is_relative_to((state_root / name).resolve())
+                    for name in ("user", "user-modded"))):
+        raise RuntimeError("the Token balance is not in the private state's save")
     saved = tomllib.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
     if saved.get("version") != 1 or saved.get("balance") != after:
         raise RuntimeError("the saved Token balance does not match the purchase")

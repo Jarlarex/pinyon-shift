@@ -371,18 +371,23 @@ as Marketplace content packages, so they do not depend on DLC-1.
   The offer, `ForzaUI::CConsumableHelper` sub_82681698, first checks for a
   LIVE user (sub_82753C68) and the Forza server (sub_824127B8); the Sponsor
   Challenges screen's RT BUY POPULARITY SPIKE (sub_8283DF18) checks both
-  again. `pinyon_shift_dlc_tokens` (default `-1`, off) is the balance the
-  store starts with: midasm hooks (`config/rexglue/analysis-v4/v4-additions.toml`,
-  `src/dlc_tokens.cpp`) report the host balance from Refresh and at the
-  offer, pass those checks for these callers only, and answer `ConsumeAsset`
-  for Tokens on the next frame through the transaction's own completion.
-  What is left is kept in `user/pinyon_shift_tokens.toml` (`user-modded/`
-  with mods), not in the encrypted profile, which never held a balance; a
-  setting other than the one the saved balance started from starts again
-  from the setting. Verified 2026-10-09 with
+  again. `pinyon_shift_dlc_tokens` (default 100; `-1` turns the service
+  off) is the balance each save starts with: midasm hooks
+  (`config/rexglue/analysis-v4/v4-additions.toml`, `src/dlc_tokens.cpp`)
+  report the host balance from Refresh and at the offer, pass those checks
+  for these callers only, and answer `ConsumeAsset` for Tokens on the next
+  frame through the transaction's own completion. What is left is kept in
+  `pinyon_shift_tokens.toml` in the save's own `ForzaProfile` folder (beside
+  the Rally progress; the folder the title has open when it loads or saves
+  the profile), not in the encrypted profile, which never held a balance.
+  A new save therefore starts from the setting, a restored save backup
+  brings its balance back, and a setting other than the one a save's
+  balance started from starts it again from the setting. With the default,
+  a save without a balance offered 100 and left 99, and the route run again
+  from that state offered 99 and left 98. Verified 2026-10-09 with
   `config/render-tests/fh1-token-store.fh1test` from `.local/preview`
   (EU + v4, Vulkan): the offer read "Current Tokens: 50", a 30 minute
-  Popularity Spike cost 1 and activated in free roam, and the file held 49;
+  Popularity Spike cost 1 and activated in free roam, and the save held 49;
   the route run again from that run's private state loaded 49, offered 49
   and left 48 (`token_purchase` in the results, `dlc.tokens.*` events). With
   the setting off the screen still says the server is unavailable and no

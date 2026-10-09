@@ -833,18 +833,26 @@ class Fh1RenderTestRunnerTests(unittest.TestCase):
                 MODULE.rally_transition_summary([award, running | changes, later | changes], 1, 2)
 
     def test_token_purchase_pays_the_offered_balance_and_saves_it(self):
-        loaded = dict(event="dlc.tokens.wallet", action="loaded", start="-1", balance="0")
         started = dict(event="dlc.tokens.wallet", action="started", balance="50")
         offer = dict(event="dlc.tokens.offer", item="2", price="1", balance="50")
         paid = dict(event="dlc.tokens.consume", action="paid", price="1", balance_before="50",
                     balance_after="49", state="0")
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            (root / "user").mkdir()
-            wallet = root / "user" / "pinyon_shift_tokens.toml"
+            save = root / "user" / "B13EBABEBABEBABE" / "4D5309C9" / "00000001" / "ForzaProfile"
+            save.mkdir(parents=True)
+            wallet = save / "pinyon_shift_tokens.toml"
             wallet.write_text("version = 1\nstart = 50\nbalance = 49\n", encoding="utf-8")
+            loaded = dict(event="dlc.tokens.wallet", action="loaded", start="-1", balance="0",
+                          path=str(wallet))
+            # Only a file in the private state's own save counts.
+            outside = dict(loaded, path=str(root / "pinyon_shift_tokens.toml"))
+            with self.assertRaisesRegex(RuntimeError, "private state's save"):
+                MODULE.token_purchase_summary([outside, started, offer, paid], root, 2, 1)
             result = MODULE.token_purchase_summary([loaded, started, offer, paid], root, 2, 1)
             self.assertEqual((result["offered"], result["after"], result["restored"]), (50, 49, False))
+            extended = dict(loaded, path="\\\\?\\" + str(wallet))
+            self.assertEqual(MODULE.token_purchase_summary([extended, started, offer, paid], root, 2, 1)["after"], 49)
             # After a restart the balance comes from the file, not the setting.
             restored = MODULE.token_purchase_summary(
                 [loaded | dict(start="50", balance="50"), offer, paid], root, 2, 1)

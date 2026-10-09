@@ -6767,6 +6767,10 @@ void PinyonShiftTraceSavePreEncryption(PPCRegister& r4, PPCRegister& r5) {
   pinyon_shift::mod::RecordSave(r4.u32, r5.u32);
   SnapshotSavePayload("plaintext", r4.u32, r5.u32, FH1_ADDR(0x82C666D4u));
   ScanLiveProfile(r4.u32, r5.u32);
+  if (PinyonShiftGuestRangeReadable(r4.u32, r5.u32)) {
+    pinyon_shift::dlc::NoteTokenSave(
+        rex::system::kernel_state()->memory()->TranslateVirtual<const uint8_t*>(r4.u32), r5.u32);
+  }
 }
 
 void PinyonShiftObserveSaveDecrypted(PPCRegister& r24, PPCRegister& r30) {
@@ -6787,6 +6791,7 @@ void PinyonShiftObserveSaveDecrypted(PPCRegister& r24, PPCRegister& r30) {
   auto* body = kernel_state->memory()->TranslateVirtual<uint8_t*>(address);
   pinyon_shift::dlc::GrantProfileUnlocks(body, size);
   pinyon_shift::cheats::EditLoadedProfile(body, size);
+  pinyon_shift::dlc::NoteTokenSave(body, size);
 }
 
 void PinyonShiftAcceptModdedBlock(PPCRegister& r3, PPCRegister& r24) {

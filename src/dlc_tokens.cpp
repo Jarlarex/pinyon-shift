@@ -7,6 +7,7 @@
 #include <fstream>
 #include <mutex>
 #include <string>
+#include <utility>
 
 #include <fmt/format.h>
 #include <toml++/toml.hpp>
@@ -15,20 +16,21 @@
 #include <rex/memory.h>
 #include <rex/ppc/context.h>
 #include <rex/system/kernel_state.h>
+#include <rex/system/xam/content_manager.h>
+#include <rex/system/xam/user_profile.h>
 #include <rex/system/xmemory.h>
 
 #include "fh1_guest_address.h"
 #include "mod/mod_host.h"
 #include "pinyon_shift_diagnostics.h"
+#include "save/profile_body.h"
 
-// Off by default: Tokens were bought with real money, so the balance is the
-// player's choice.
-REXCVAR_DEFINE_INT32(pinyon_shift_dlc_tokens, -1, "Pinyon Shift",
-                     "Tokens the offline token store starts with (title update v4): the "
-                     "in-game marketplace's Treasure Map, Popularity Spikes and other token "
-                     "items can be bought with them. What is left is kept with the profile "
-                     "across restarts; a different amount starts again from it. -1 leaves the "
-                     "store offline")
+REXCVAR_DEFINE_INT32(pinyon_shift_dlc_tokens, 100, "Pinyon Shift",
+                     "Tokens each save starts with in the offline token store (title update "
+                     "v4): the in-game marketplace's Treasure Map, Popularity Spikes and other "
+                     "token items can be bought with them. What is left is kept in the save's "
+                     "folder across restarts; a different amount starts every save again from "
+                     "it. -1 leaves the store offline")
     .range(-1, 999999)
     .lifecycle(rex::cvar::Lifecycle::kHotReload);
 
@@ -72,8 +74,9 @@ REXCVAR_DEFINE_INT32(pinyon_shift_dlc_tokens, -1, "Pinyon Shift",
 // reports the host balance, those checks pass for the token store's callers
 // only, and ConsumeAsset for Tokens is answered on the next frame through the
 // transaction's completion, as the service's answer was. What is left is kept
-// in pinyon_shift_tokens.toml beside the profiles (user/ or user-modded/),
-// not in the encrypted profile, which never held a balance.
+// in pinyon_shift_tokens.toml in the save's own ForzaProfile folder (beside
+// the Rally progress), so a new save starts from the setting and a restored
+// save brings its balance back; the encrypted profile never held one.
 namespace {
 
 namespace diagnostics = pinyon_shift::diagnostics;
@@ -103,6 +106,7 @@ bool TokenStoreCaller(const std::array<uint32_t, 2>& callers, uint32_t caller) {
 }
 
 struct Wallet {
+  std::filesystem::path path;  // pinyon_shift_tokens.toml in the save's folder
   bool loaded = false;
   int64_t start = -1;  // the setting the balance was started from
   int64_t balance = 0;
@@ -116,17 +120,29 @@ bool Active() {
   return REXCVAR_GET(pinyon_shift_dlc_tokens) >= 0;
 }
 
-std::filesystem::path WalletPath() {
-  const auto& root = diagnostics::StateRoot();
-  return (pinyon_shift::mod::ModdedProfile() ? root / "user-modded" : root / "user") /
-         "pinyon_shift_tokens.toml";
+// The open profile save's folder (user/<xuid>/4D5309C9/00000001/ForzaProfile),
+// as the Rally progress finds it; empty while the title has none open.
+std::filesystem::path OpenProfileFolder() {
+  auto* kernel = rex::system::kernel_state();
+  if (!kernel || !kernel->content_manager() || !kernel->user_profile()) return {};
+  auto folder = kernel->content_manager()->GetOpenPackagePath(
+      fmt::format("{:016X}", kernel->user_profile()->xuid()));
+  return folder.filename() == "ForzaProfile" ? folder : std::filesystem::path{};
+}
+
+// Switches to the balance of the save in `folder`. Called with g_wallet_mutex
+// held.
+void UseProfileFolder(const std::filesystem::path& folder) {
+  auto path = folder / "pinyon_shift_tokens.toml";
+  if (path == g_wallet.path) return;
+  g_wallet = Wallet{};
+  g_wallet.path = std::move(path);
 }
 
 void SaveWallet(const Wallet& wallet) {
-  const auto path = WalletPath();
+  const auto& path = wallet.path;
   const auto temporary = path.string() + ".tmp";
   std::error_code error;
-  std::filesystem::create_directories(path.parent_path(), error);
   {
     std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
     output << "# Pinyon Shift's offline Token balance (pinyon_shift_dlc_tokens).\n"
@@ -142,15 +158,25 @@ void SaveWallet(const Wallet& wallet) {
   }
 }
 
-// The balance for the current setting, loading the saved one first; -1 while
-// the service is off. A setting other than the one the saved balance started
-// from starts again from the setting. Called with g_wallet_mutex held.
+// The balance of the open save for the current setting, loading the saved one
+// first; -1 while the service is off or no save is open. A save without one,
+// or with one started from another setting, starts from the setting. Called
+// with g_wallet_mutex held.
 int64_t Balance() {
   if (!Active()) return -1;
+  if (g_wallet.path.empty()) {
+    const auto folder = OpenProfileFolder();
+    if (folder.empty()) {
+      static bool logged = false;
+      if (!std::exchange(logged, true)) diagnostics::RecordEvent("dlc.tokens.no_save");
+      return -1;
+    }
+    UseProfileFolder(folder);
+  }
   const int64_t configured = REXCVAR_GET(pinyon_shift_dlc_tokens);
   if (!g_wallet.loaded) {
     g_wallet.loaded = true;
-    const auto path = WalletPath();
+    const auto& path = g_wallet.path;
     std::error_code error;
     if (std::filesystem::exists(path, error)) {
       try {
@@ -259,6 +285,16 @@ void CompleteConsume(uint32_t transaction, uint32_t price) {
 }  // namespace
 
 namespace pinyon_shift::dlc {
+
+void NoteTokenSave(const uint8_t* body, size_t size) {
+  if constexpr (!fh1::kTitleUpdateV4) return;
+  // Other secure files pass through here too; only the profile has Main.
+  if (!body || !save::FindProfileField(body, size, "Main/Credits")) return;
+  const auto folder = OpenProfileFolder();
+  if (folder.empty()) return;
+  std::lock_guard lock(g_wallet_mutex);
+  UseProfileFolder(folder);
+}
 
 bool TokenStoreServerCheck(uint32_t caller) {
   if (!TokenStoreCaller(kServerCallers, caller) || !Active()) return false;
