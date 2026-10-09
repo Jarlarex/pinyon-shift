@@ -95,6 +95,21 @@ class OwnedDlcFolderTests(unittest.TestCase):
                 dlc.install_folder(self.source, self.state, self.root / "extractor")
         self.assertFalse(list(self.state.glob("user/**/00000002/*")))
 
+    def test_a_licence_only_copy_sorted_first_still_joins_its_verified_copy(self):
+        broken = package_bytes("11" * 20, fill=2)
+        self.package["rejected"].append(dict(sha256=hashlib.sha256(broken).hexdigest().upper(), size=len(broken),
+                                             license_mask="00000004", reason="Corrupt terrain archive",
+                                             license_only=True))
+        self.source = self.root / "licence-first"
+        self.source.mkdir()
+        (self.source / "a corrupt copy.pkg").write_bytes(broken)
+        (self.source / "b verified copy.pkg").write_bytes(self.good)
+        report = {Path(row["file"]).name: row["status"] for row in self.install()["files"]}
+        self.assertEqual(report, {"a corrupt copy.pkg": "imported", "b verified copy.pkg": "imported"})
+        package = {row["package_id"]: row for row in dlc.list_content(self.state)}["A" * 42]
+        self.assertEqual(package["license_mask"], "00000005")
+        self.assertTrue(package["enabled"])
+
     def test_installing_again_changes_nothing(self):
         self.install()
         report = {Path(row["file"]).name: row["status"] for row in self.install()["files"]}
@@ -128,6 +143,15 @@ class CatalogTests(unittest.TestCase):
         # Its licence is empty; offer 2800 needs ContentOffers.LicenseMask 1.
         self.assertEqual(mustang["accepted"][0]["license_mask"], "00000000")
         self.assertEqual(mustang["license_grant"]["mask"], "00000001")
+
+    def test_rally_corrupt_copy_supplies_only_its_licence(self):
+        catalog = json.loads((ROOT / "config/supported-dlc.json").read_text(encoding="utf-8"))
+        rally = next(p for p in catalog["packages"] if p["package_id"] == "6F6992766050D818245ADD408031E280FB5F4E634D")
+        corrupt = next(v for v in rally["rejected"] if v["sha256"].startswith("AA7BD510"))
+        # Its licence covers the season-pass Focus SVT (offer mask 00000004).
+        self.assertTrue(corrupt["license_only"])
+        self.assertEqual(int(corrupt["license_mask"], 16) & 4, 4)
+        self.assertEqual([v["license_mask"] for v in rally["accepted"]], ["00000001"])
 
     def test_catalog_licence_grants_are_explicit(self):
         catalog = json.loads((ROOT / "config/supported-dlc.json").read_text(encoding="utf-8"))

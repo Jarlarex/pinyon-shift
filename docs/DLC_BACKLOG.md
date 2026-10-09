@@ -188,6 +188,11 @@ assuming the supplied v4 works with every base dump.
   `license_grant` of `00000001`, which the import ORs into that package's
   header mask only. An install made before the grant fails verification on
   enable and picks the grant up when the package is imported again.
+  Rally's rejected copy `AA7BD510…` (corrupt ColoradoDirt terrain) is marked
+  `license_only`: importing it beside the accepted `0D9F6833…` adds its
+  licence (`FFFFFFFF`, which includes the Focus SVT offer's `00000004`) to the
+  installed package, and its payload is never extracted. On its own it is
+  refused; a folder install retries it after the folder's other files.
 - [ ] Use one small representative car pack to verify enumeration, database
   merge, car purchase, garage rendering, driving, upgrades and save/reload.
 - [ ] Check repeated import, wrong-title packages, interrupted import, missing

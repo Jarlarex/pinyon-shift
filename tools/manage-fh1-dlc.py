@@ -105,6 +105,8 @@ def inspect(stream, size: int, manifest: dict) -> tuple[dict, dict]:
     sha = digest.hexdigest().upper()
     for rejected in package["rejected"]:
         if rejected["sha256"] == sha:
+            if rejected.get("license_only") and rejected["size"] == size:
+                return package, rejected
             raise ValueError(f'{package["display_name"]}: {rejected["reason"]}')
     variant = next((v for v in package["accepted"] if v["size"] == size and v["sha256"] == sha), None)
     if variant is None:
@@ -112,9 +114,24 @@ def inspect(stream, size: int, manifest: dict) -> tuple[dict, dict]:
     return package, variant
 
 
+class LicenceOnlyInput(ValueError):
+    """A copy whose payload is rejected but whose licence may join a verified copy."""
+
+    @classmethod
+    def for_package(cls, package: dict) -> "LicenceOnlyInput":
+        return cls(f'{package["display_name"]}: this copy supplies only its licence; '
+                   'import the verified package too')
+
+
+def licence_variants(package: dict) -> list[dict]:
+    """Variants whose licence counts: accepted copies, then rejected copies
+    marked license_only, whose payload is never installed."""
+    return package["accepted"] + [v for v in package.get("rejected", []) if v.get("license_only")]
+
+
 def record_variants(package: dict, shas: list[str]) -> list[dict]:
     """Catalog variants for these hashes, in catalog order, or ValueError."""
-    variants = [v for v in package["accepted"] if v["sha256"] in shas]
+    variants = [v for v in licence_variants(package) if v["sha256"] in shas]
     if not shas or len(variants) != len(set(shas)):
         raise ValueError("import record is damaged; import the original package again")
     return variants
@@ -156,13 +173,21 @@ def stage_inputs(source: Path, temporary: Path, manifest: dict) -> list[tuple[Pa
         with path.open("rb") as file:
             package, variant = inspect(file, size, manifest)
         id = package["package_id"]
+        # A licence-only copy contributes its licence, never its payload.
+        payload = None if variant.get("license_only") else path
+        if payload is None:
+            path.unlink()
         if id in found:
             # Same payload, another licence: keep one copy and both purchases.
-            if all(v["sha256"] != variant["sha256"] for v in found[id][3]):
-                found[id][3].append(variant)
-            path.unlink()
+            previous, _, _, variants = found[id]
+            if all(v["sha256"] != variant["sha256"] for v in variants):
+                variants.append(variant)
+            if previous is None and payload is not None:
+                found[id] = (payload, package, variant, variants)
+            elif payload is not None:
+                path.unlink()
             return
-        found[id] = (path, package, variant, [variant])
+        found[id] = (payload, package, variant, [variant])
 
     inputs = sorted(source.rglob("*")) if source.is_dir() else [source]
     for path in inputs:
@@ -309,7 +334,7 @@ def import_content(source: Path, state: Path, extractor: Path) -> list[dict]:
         # Licences already imported for each package; a new variant adds to them.
         previous = {}
         # Reject batch conflicts before publishing any package.
-        for _, package, _, _ in inputs:
+        for input_path, package, _, _ in inputs:
             id = package["package_id"]
             enabled, disabled, _ = package_paths(state, id)
             record_path = state / "dlc" / (id + ".json")
@@ -328,13 +353,15 @@ def import_content(source: Path, state: Path, extractor: Path) -> list[dict]:
                 _, digest = payload_catalog(enabled if enabled.exists() else disabled)
                 if digest != package["payload_sha256"]:
                     repair.add(id)
+            if input_path is None and (id not in previous or id in repair):
+                raise LicenceOnlyInput.for_package(package)
         for index, (input_path, package, variant, variants) in enumerate(inputs):
             id = package["package_id"]
             enabled, disabled, header = package_paths(state, id)
             record_path = state / "dlc" / (id + ".json")
             primary, owned = previous.get(id, (variant["sha256"], []))
             shas = {v["sha256"] for v in owned + variants}
-            variants = [v for v in package["accepted"] if v["sha256"] in shas]
+            variants = [v for v in licence_variants(package) if v["sha256"] in shas]
             mask = combined_mask(package, variants)
             installed = enabled if enabled.exists() else disabled
             if id not in repair and installed.exists() and header.is_file():
@@ -353,6 +380,8 @@ def import_content(source: Path, state: Path, extractor: Path) -> list[dict]:
                             sha256=primary, variants=[v["sha256"] for v in variants], license_mask=mask,
                             header_sha256=hashlib.sha256(data).hexdigest().upper()))
                         continue
+            if input_path is None:
+                raise LicenceOnlyInput.for_package(package)
             extracted = staging / str(index)
             result = subprocess.run([str(extractor), "--dlc-files", str(input_path), str(extracted), id],
                                     capture_output=True, text=True)
@@ -436,21 +465,31 @@ def install_folder(source: Path, state: Path, extractor: Path) -> dict:
             if metadata.is_dir() else {}
 
     rows = []
-    for path in sorted(path for path in source.rglob("*") if path.is_file() and not path.is_symlink()):
-        with path.open("rb") as stream:
-            magic = stream.read(4)
-        if magic not in MAGIC and not zipfile.is_zipfile(path):
-            rows.append(dict(file=str(path), status="skipped", reason="not a DLC package"))
-            continue
-        before = records()
-        try:
-            import_content(path, state, extractor)
-        except (ValueError, zipfile.BadZipFile) as error:
-            if str(error).startswith("close the game"):
-                raise  # Nothing can be installed while the game runs; stop instead of failing every file.
-            rows.append(dict(file=str(path), status="skipped", reason=str(error)))
-            continue
-        rows.append(dict(file=str(path), status="imported" if records() != before else "already installed"))
+    paths = sorted(path for path in source.rglob("*") if path.is_file() and not path.is_symlink())
+    # A licence-only copy waits for its verified copy, wherever that sorts.
+    waiting = []
+    for retry, batch in enumerate((paths, waiting)):
+        for path in batch:
+            with path.open("rb") as stream:
+                magic = stream.read(4)
+            if magic not in MAGIC and not zipfile.is_zipfile(path):
+                rows.append(dict(file=str(path), status="skipped", reason="not a DLC package"))
+                continue
+            before = records()
+            try:
+                import_content(path, state, extractor)
+            except LicenceOnlyInput as error:
+                if not retry:
+                    waiting.append(path)
+                    continue
+                rows.append(dict(file=str(path), status="skipped", reason=str(error)))
+                continue
+            except (ValueError, zipfile.BadZipFile) as error:
+                if str(error).startswith("close the game"):
+                    raise  # Nothing can be installed while the game runs; stop instead of failing every file.
+                rows.append(dict(file=str(path), status="skipped", reason=str(error)))
+                continue
+            rows.append(dict(file=str(path), status="imported" if records() != before else "already installed"))
     for record in list_content(state):
         if not record.get("enabled"):
             try:

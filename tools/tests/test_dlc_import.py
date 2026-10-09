@@ -188,6 +188,58 @@ class DlcImportTests(unittest.TestCase):
             self.assertEqual(rows[0]["license_mask"], "00000003")
             self.assertEqual(len(rows[0]["variants"]), 2)
 
+    def test_licence_only_copy_adds_its_licence_but_never_its_payload(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, manifest, package = self.fixture(root)
+            # Like Rally's corrupt copy: payload rejected, licence usable.
+            broken = bytearray(source.read_bytes())
+            broken[-1] ^= 1
+            licence = root / "licence"
+            licence.write_bytes(broken)
+            rejected = dict(sha256=hashlib.sha256(broken).hexdigest().upper(), size=len(broken),
+                            license_mask="00000004", reason="Corrupt terrain archive", license_only=True)
+            package["rejected"].append(rejected)
+            extractions = []
+            def extract(args, **kwargs):
+                extractions.append(Path(args[2]).read_bytes())
+                destination = Path(args[3])
+                folder = destination / dlc.CONTENT / "00000002" / package["package_id"]
+                folder.mkdir(parents=True)
+                (folder / "offer.puboffer").write_bytes(b"owned")
+                sdk_header = destination / dlc.CONTENT / "Headers" / "00000002" / (package["package_id"] + ".header")
+                sdk_header.parent.mkdir(parents=True)
+                sdk_header.write_bytes(bytes(328) + b"\1\0\0\0")
+                return subprocess.CompletedProcess(args, 0, "", "")
+            with patch.object(dlc, "catalog", return_value=manifest), \
+                    patch.object(dlc.subprocess, "check_output", return_value=b""), \
+                    patch.object(dlc.subprocess, "run", side_effect=extract):
+                state = root / "state"
+                active, inactive, header = dlc.package_paths(state, package["package_id"])
+                with self.assertRaisesRegex(dlc.LicenceOnlyInput, "only its licence"):
+                    dlc.import_content(licence, state, root / "extractor")
+                self.assertFalse(active.exists() or inactive.exists() or header.exists())
+                self.assertEqual(dlc.import_content(source, state, root / "extractor")[0]["license_mask"], "00000001")
+                rows = dlc.import_content(licence, state, root / "extractor")
+                self.assertEqual(rows[0]["license_mask"], "00000005")
+                self.assertEqual(rows[0]["sha256"], package["accepted"][0]["sha256"])
+                self.assertEqual(rows[0]["variants"], [package["accepted"][0]["sha256"], rejected["sha256"]])
+                self.assertEqual(int.from_bytes(header.read_bytes()[328:332], "little"), 5)
+                self.assertTrue(dlc.set_enabled(state, package["package_id"], True)[0]["enabled"])
+                # Both copies in one folder, the licence-only one first: its payload is never used.
+                batch = root / "batch"
+                batch.mkdir()
+                (batch / "a").write_bytes(broken)
+                (batch / "b").write_bytes(source.read_bytes())
+                rows = dlc.import_content(batch, root / "fresh", root / "extractor")
+                self.assertEqual(rows[0]["license_mask"], "00000005")
+                self.assertEqual(rows[0]["sha256"], package["accepted"][0]["sha256"])
+                self.assertEqual(extractions, [source.read_bytes()] * 2)
+                # Without the marker the copy is rejected outright.
+                del rejected["license_only"]
+                with licence.open("rb") as stream, self.assertRaisesRegex(ValueError, "Corrupt terrain archive"):
+                    dlc.inspect(stream, len(broken), manifest)
+
     def test_catalog_licence_grant_widens_new_and_existing_imports(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
