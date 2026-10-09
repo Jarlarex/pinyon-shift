@@ -50,7 +50,8 @@ an AMD Radeon 860M.
 A DLC car appears only when its package carries a licence for it, exactly as
 on a console. For example, the Rally Expansion's 2003 Ford Focus SVT needs the
 Season Pass licence inside the Rally package, and a package without a licence
-shows none of its cars. Licences are never added or changed.
+shows none of its cars. Within this project, packages and their licence masks
+may be changed or modified so that the content runs.
 
 ## Requirements
 

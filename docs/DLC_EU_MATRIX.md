@@ -35,7 +35,7 @@ Notes:
 - Purchases persist: a Civic Si and a GMC Vandura bought on the EU save were still owned after a restart (player check 2026-10-08).
 - 1000 Club runs with the update's offline setting on (setup turns it on for the EU disc).
 - "Not yet" means the package mounted but no file was opened before the route ended; the Autoshow check decides.
-  The Mustang's licence mask is `00000000` as supplied; it is recorded, never changed.
+  The Mustang's licence mask is `00000000` as supplied; licence masks may be changed or modified within the project.
 
 - Later supplies (2026-10-08): two more Mustang Pizza Hut copies were byte-identical to the first (no licence), and a
   multi-pack archive held the same rejected Rally variant; its second VIP package was new and is installed. A further supply held the accepted Rally package (`0D9F6833…`), now installed; the earlier rejected and truncated copies are no longer needed.
