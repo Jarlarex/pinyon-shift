@@ -153,9 +153,12 @@ registers = ["r3"]
 # ((+9012 == 2 or +13276) and +13205 of [0x833CABB0]). Default-off 1000 Club
 # diagnostic (pinyon_shift_car_challenge_gate_probe) answers yes for every
 # direct caller; the offline token service (pinyon_shift_dlc_tokens) answers
-# yes for the token store's offer, sub_82681698 (lr 0x826816EC), and the
+# yes for the token store's offer, sub_82681698 (lr 0x826816EC), the
 # Sponsor Challenges screen's RT BUY POPULARITY SPIKE, sub_8283DF18
-# (lr 0x8283DFB4); otherwise the original body runs.
+# (lr 0x8283DFB4), and a car bought for Tokens in the garage flows: the buy
+# prompt sub_82682E30 (lr 0x82682E78), the Token confirmation sub_82683BF0
+# (lr 0x82683C28) and the purchase sub_8267B0C0 (lr 0x8267B0E8); otherwise
+# the original body runs.
 address = 0x824127B8
 name = "PinyonShiftServerAvailableProbe"
 registers = ["r3", "lr"]
@@ -183,7 +186,8 @@ registers = ["r11", "r24"]
 [[midasm_hook]]
 # Entry of sub_82753C68(screen, item), the LIVE sign-in and privilege check
 # that shows its own failure popup: passes for the offer's call
-# (lr 0x826816D8) and the Sponsor Challenges screen's (lr 0x8283DFD0) only.
+# (lr 0x826816D8), the Sponsor Challenges screen's (lr 0x8283DFD0) and the
+# garage flows' Token confirmation (lr 0x82683C14) only.
 address = 0x82753C68
 name = "PinyonShiftTokenStoreSignin"
 registers = ["r3", "lr"]

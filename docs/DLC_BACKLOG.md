@@ -393,12 +393,22 @@ as Marketplace content packages, so they do not depend on DLC-1.
   the setting off the screen still says the server is unavailable and no
   file is written; with 0 Tokens the title's own "INSUFFICIENT TOKENS!"
   appears, and its offer to buy more Tokens still asks for an Xbox LIVE
-  profile. Not exercised: no car has a Token price here (the
-  `ContentRestrictions` table behind the showroom's "or N Tokens" is empty
-  in v4's database and absent from all installed DLC merge databases), and
-  the only save already owns the Treasure Map (5 Tokens, the same offer and
-  purchase path). `ForzaUI::CMarketplaceHome` keeps its own server check,
-  and the base-disc build has no token service.
+  profile. Cars can be bought for Tokens too: sub_82566528 takes a car's
+  price from `ContentRestrictions.TokenCost` when a row exists (none does in
+  v4's database or the installed DLC merge databases) and otherwise from its
+  credit price, 1 Token below 35,000 Cr plus one at each of 100,000,
+  300,000, 900,000, 2,700,000 and 8,100,000 (at most 7). The garage flows
+  (`ForzaUI::CPopupsGarageFlows`) check the server in the buy prompt
+  (sub_82682E30), the Token confirmation (sub_82683BF0, which also checks
+  the LIVE user and compares the balance with the price) and the purchase
+  (sub_8267B0C0, "servers not available"), then buy through `ConsumeAsset`
+  with a `CPopupGarageFlowsConsumeAssetTransaction` whose completion,
+  sub_826786E8, buys the car; those checks pass too. Not exercised: a car
+  bought for Tokens (a player reported "servers not available" before the
+  garage checks passed, 2026-10-09), and the Treasure Map (5 Tokens, the
+  same offer and purchase path), which the only save already owns.
+  `ForzaUI::CMarketplaceHome` and buying more Tokens keep their own server
+  checks, and the base-disc build has no token service.
 
 **Done when:** both work offline on Vulkan from a pinned seed, survive
 restart, and turning the options off never removes what was already granted

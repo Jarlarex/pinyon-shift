@@ -95,13 +95,20 @@ constexpr uint32_t kTransactionComplete = 28;  // vtable slot, r4 the result
 constexpr uint32_t kNotEnoughTokens = 0x80514501u;
 constexpr uint32_t kServiceError = 0x80500001u;
 // Return addresses of the token store's own checks: the offer
-// (sub_82681698) and the Sponsor Challenges screen's RT BUY POPULARITY SPIKE
+// (sub_82681698); the Sponsor Challenges screen's RT BUY POPULARITY SPIKE
 // (CSponsorChallenge input, sub_8283DF18), which shows "FEATURE UNAVAILABLE"
-// before reaching the offer.
-constexpr std::array<uint32_t, 2> kSigninCallers = {0x826816D8u, 0x8283DFD0u};
-constexpr std::array<uint32_t, 2> kServerCallers = {0x826816ECu, 0x8283DFB4u};
+// before reaching the offer; and a car bought for Tokens in the garage flows
+// (ForzaUI::CPopupsGarageFlows): the buy prompt (sub_82682E30), the Token
+// confirmation that compares the balance with the car's price (sub_82683BF0)
+// and the purchase itself (sub_8267B0C0 with r4 = 1, "servers not
+// available" on failure). Buying more Tokens (sub_826789B0, sub_82677750)
+// stays offline.
+constexpr std::array<uint32_t, 3> kSigninCallers = {0x826816D8u, 0x8283DFD0u, 0x82683C14u};
+constexpr std::array<uint32_t, 5> kServerCallers = {0x826816ECu, 0x8283DFB4u, 0x82682E78u,
+                                                    0x82683C28u, 0x8267B0E8u};
 
-bool TokenStoreCaller(const std::array<uint32_t, 2>& callers, uint32_t caller) {
+template <size_t N>
+bool TokenStoreCaller(const std::array<uint32_t, N>& callers, uint32_t caller) {
   return std::find(callers.begin(), callers.end(), caller) != callers.end();
 }
 
