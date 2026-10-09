@@ -83,5 +83,82 @@ class LayoutTests(unittest.TestCase):
             xds.layout(b"\0" * 10)
 
 
+def distinct_blocks(layout):
+    """Every visible block of every level filled with its own recognisable bytes."""
+    levels = []
+    for index, level in enumerate(layout.levels):
+        count = level.blocks[0] * level.blocks[1]
+        levels.append(b"".join(struct.pack(">HH", index, n) * (layout.block_bytes // 4) for n in range(count)))
+    return levels
+
+
+class BlockTests(unittest.TestCase):
+    def test_tiled_offsets_visit_every_block_of_a_tile_once(self):
+        for log2 in (3, 4):
+            offsets = {xds.tiled_offset_2d(x, y, 32, log2) for y in range(32) for x in range(32)}
+            self.assertEqual(offsets, set(range(0, 1024 << log2, 1 << log2)))
+
+    def test_blocks_round_trip_on_an_odd_size(self):
+        head = header(200, 72, DXT5, 1, 0, packed=False)
+        layout = xds.layout(head)
+        levels = distinct_blocks(layout)
+        data = xds.write_blocks(head, levels)
+        self.assertEqual(len(data), xds.HEADER_SIZE + layout.data_size)
+        self.assertEqual(xds.read_blocks(data), levels)
+
+    def test_eight_in_sixteen_endian_swaps_byte_pairs(self):
+        head = header(4, 4, DXT1, 1, 0, packed=False)
+        data = xds.write_blocks(head, [bytes(range(8))])
+        self.assertEqual(data[xds.HEADER_SIZE:xds.HEADER_SIZE + 8], bytes([1, 0, 3, 2, 5, 4, 7, 6]))
+
+    def test_square_packed_mip_chain_round_trips_and_levels_do_not_overlap(self):
+        head = header(64, 64, DXT5, 7, 0x4)
+        layout = xds.layout(head)
+        levels = distinct_blocks(layout)
+        data = xds.write_blocks(head, levels)
+        self.assertEqual(xds.read_blocks(data), levels)
+        tail = [level for level in layout.levels if level.packed_blocks is not None]
+        positions = [(level.offset, level.packed_blocks) for level in tail]
+        self.assertEqual(len(set(positions)), len(tail))
+
+    def test_non_square_packed_mip_chain_round_trips(self):
+        head = header(256, 64, DXT5, 9, 0x10)
+        levels = distinct_blocks(xds.layout(head))
+        self.assertEqual(xds.read_blocks(xds.write_blocks(head, levels)), levels)
+
+    def test_wide_texture_places_its_smallest_levels_like_the_stock_files(self):
+        # The FR-S's 128x64 wood.xds keeps its 4x2, 2x1 and 1x1 levels here.
+        layout = xds.layout(header(128, 64, DXT1, 8, 0x2))
+        self.assertEqual([level.packed_blocks for level in layout.levels[2:]],
+                         [(0, 4), (0, 2), (0, 1), (4, 0), (2, 0), (1, 0)])
+
+    def test_writing_onto_a_template_keeps_its_padding(self):
+        head = header(128, 16, DXT5, 1, 0, packed=False)
+        template = head + bytes(range(256)) * 64
+        data = xds.write_blocks(head, distinct_blocks(xds.layout(head)), template=template)
+        visible = {xds.tiled_offset_2d(x, y, 32, 4) + i for y in range(4) for x in range(32) for i in range(16)}
+        padding = [i for i in range(16384) if i not in visible]
+        self.assertTrue(padding)
+        self.assertTrue(all(data[xds.HEADER_SIZE + i] == template[xds.HEADER_SIZE + i] for i in padding))
+
+    def test_roundtrip_reports_an_exact_texture(self):
+        head = header(64, 64, DXT5, 7, 0x4)
+        data = xds.write_blocks(head, distinct_blocks(xds.layout(head)))
+        result = xds.roundtrip(data)
+        self.assertEqual((result["byte_exact"], result["differing_bytes"]), (True, 0))
+
+    def test_roundtrip_reports_bytes_outside_every_level(self):
+        head = header(128, 16, DXT5, 1, 0, packed=False)
+        data = bytearray(xds.write_blocks(head, distinct_blocks(xds.layout(head))))
+        data[-1] = 0xAA  # last byte of the tile lies in padding below the 4 visible block rows
+        result = xds.roundtrip(bytes(data))
+        self.assertEqual((result["byte_exact"], result["differing_bytes"]), (False, 1))
+
+    def test_untiled_textures_are_refused(self):
+        head = header(64, 64, DXT5, 1, 0, packed=False, tiled=False)
+        with self.assertRaisesRegex(ValueError, "untiled"):
+            xds.read_blocks(head + bytes(0x4000))
+
+
 if __name__ == "__main__":
     unittest.main()

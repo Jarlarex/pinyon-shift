@@ -17,6 +17,7 @@ one whose smaller side is 16 texels or less share one packed tile.
 # No `from __future__ import annotations`: the dataclasses below must also work
 # when tools load this file by path (importlib), where string annotations fail.
 import struct
+import sys
 from dataclasses import dataclass
 
 HEADER_SIZE = 0x34
@@ -64,16 +65,28 @@ def _blocks(width: int, height: int) -> tuple[tuple[int, int], tuple[int, int]]:
     return visible, padded
 
 
-def _packed_offset(width: int, height: int, packed_tile: int) -> tuple[int, int] | None:
-    """Block position of a level inside the packed tile (SDK GetPackedTileOffset)."""
+def _packed_base(width: int, height: int) -> int:
+    """The first mip level that lives in the packed tile."""
+    return max(min(_log2_ceil(width), _log2_ceil(height)) - 4, 0)
+
+
+def _packed_offset(width: int, height: int, level: int) -> tuple[int, int] | None:
+    """Block position of mip `level` of a width x height texture inside the
+    packed tile. Orientation and the smallest levels' offsets follow the base
+    texture, as the stock files show: the FR-S's 128x64 wood.xds keeps its 4x2,
+    2x1 and 1x1 levels at blocks (4,0), (2,0) and (1,0). The SDK's
+    GetPackedTileOffset gives the same positions for square textures only."""
     log2_width, log2_height = _log2_ceil(width), _log2_ceil(height)
-    if min(log2_width, log2_height) > 4:
+    base = _packed_base(width, height)
+    if level < base:
         return None
-    wide = log2_width > log2_height
-    if packed_tile < 3:
-        x, y = (0, 16 >> packed_tile) if wide else (16 >> packed_tile, 0)
+    packed, wide = level - base, log2_width > log2_height
+    if packed < 3:
+        x, y = (0, 16 >> packed) if wide else (16 >> packed, 0)
+    elif wide:
+        x, y = (1 << (log2_width - base)) >> (packed - 2), 0
     else:
-        x, y = (16 >> (packed_tile - 2), 0) if wide else (0, 16 >> (packed_tile - 2))
+        x, y = 0, (1 << (log2_height - base)) >> (packed - 2)
     return x // 4, y // 4
 
 
@@ -96,25 +109,122 @@ def layout(header: bytes) -> Layout:
 
     visible, padded = _blocks(width, height)
     padded = (_blocks(pitch, height)[1][0], padded[1])
+    width_pow2, height_pow2 = _next_pow2(width), _next_pow2(height)
     levels = [Level(width, height, visible, padded, base_offset,
-                    _packed_offset(_next_pow2(width), _next_pow2(height), 0) if packed else None)]
+                    _packed_offset(width_pow2, height_pow2, 0) if packed else None)]
     data_size = base_offset + padded[0] * padded[1] * block_bytes
     if mip_count > 1:
         if mip_offset % PAGE or mip_offset < data_size:
             raise ValueError("mip data overlaps level 0 in the .xds header")
-        offset, packed_base, tail_size = mip_offset, None, 0
+        offset, tail_size = mip_offset, 0
         for index in range(1, mip_count):
-            w, h = max(_next_pow2(width) >> index, 1), max(_next_pow2(height) >> index, 1)
+            w, h = max(width_pow2 >> index, 1), max(height_pow2 >> index, 1)
             visible, padded = _blocks(w, h)
             size = padded[0] * padded[1] * block_bytes
-            if packed and (packed_base is not None or min(w, h) <= 16):
-                if packed_base is None:
-                    packed_base, tail_size = index, size
-                levels.append(Level(w, h, visible, padded, offset,
-                                    _packed_offset(w, h, index - packed_base)))
+            position = _packed_offset(width_pow2, height_pow2, index) if packed else None
+            if position is not None:
+                tail_size = tail_size or size  # the packed tile is the first packed level's
+                levels.append(Level(w, h, visible, padded, offset, position))
             else:
                 levels.append(Level(w, h, visible, padded, offset, None))
                 offset += size
         data_size = offset + tail_size
     return Layout(width, height, name, format_number, block_bytes, bool(fetch[0] >> 31),
                   (fetch[1] >> 6) & 3, packed, levels, data_size)
+
+
+def tiled_offset_2d(x: int, y: int, pitch: int, bytes_per_block_log2: int) -> int:
+    """Byte offset of block (x, y) in a Xenos 2D tiled surface (SDK GetTiledOffset2D)."""
+    pitch = (pitch + 31) & ~31
+    macro = ((x >> 5) + (y >> 5) * (pitch >> 5)) << (bytes_per_block_log2 + 7)
+    micro = ((x & 7) + ((y & 0xE) << 2)) << bytes_per_block_log2
+    offset = macro + ((micro & ~0xF) << 1) + (micro & 0xF) + ((y & 1) << 4)
+    return (((offset & ~0x1FF) << 3) + ((y & 16) << 7) + ((offset & 0x1C0) << 2)
+            + (((((y & 8) >> 2) + (x >> 3)) & 3) << 6) + (offset & 0x3F))
+
+
+# Byte permutation within each block for none, 8-in-16, 8-in-32 and 16-in-32 endianness.
+_ENDIAN_MASKS = (0, 1, 3, 2)
+
+
+def _swap(block: bytes, endianness: int) -> bytes:
+    mask = _ENDIAN_MASKS[endianness]
+    return block if not mask else bytes(block[i ^ mask] for i in range(len(block)))
+
+
+def _block_offsets(layout: Layout, level: Level):
+    """Data offset of each visible block of a level, row by row."""
+    if not layout.tiled:
+        raise ValueError("untiled .xds textures are not supported")
+    log2 = layout.block_bytes.bit_length() - 1
+    px, py = level.packed_blocks or (0, 0)
+    pitch = level.padded_blocks[0]
+    for y in range(level.blocks[1]):
+        for x in range(level.blocks[0]):
+            yield level.offset + tiled_offset_2d(x + px, y + py, pitch, log2)
+
+
+def read_blocks(data: bytes) -> list[bytes]:
+    """Every level's visible blocks, row by row, in standard (little-endian) DXT byte order."""
+    texture = layout(data)
+    if len(data) < HEADER_SIZE + texture.data_size:
+        raise ValueError("the .xds texture is shorter than its header says")
+    size, body = texture.block_bytes, memoryview(data)[HEADER_SIZE:]
+    return [b"".join(_swap(bytes(body[o:o + size]), texture.endianness) for o in _block_offsets(texture, level))
+            for level in texture.levels]
+
+
+def write_blocks(header: bytes, levels: list[bytes], template: bytes | None = None) -> bytes:
+    """Header + data with the given blocks tiled into place; padding comes from `template`
+    (a texture with this exact header and size) or is zero."""
+    texture = layout(header)
+    if len(levels) != len(texture.levels):
+        raise ValueError(f"expected {len(texture.levels)} mip levels, got {len(levels)}")
+    if template is not None:
+        if template[:HEADER_SIZE] != header[:HEADER_SIZE] or len(template) != HEADER_SIZE + texture.data_size:
+            raise ValueError("the template texture's header or size differs")
+        data = bytearray(template[HEADER_SIZE:])
+    else:
+        data = bytearray(texture.data_size)
+    size = texture.block_bytes
+    for level, blocks in zip(texture.levels, levels):
+        if len(blocks) != level.blocks[0] * level.blocks[1] * size:
+            raise ValueError(f"level {level.width}x{level.height} needs {level.blocks[0] * level.blocks[1]} blocks")
+        for index, offset in enumerate(_block_offsets(texture, level)):
+            data[offset:offset + size] = _swap(blocks[index * size:(index + 1) * size], texture.endianness)
+    return bytes(header[:HEADER_SIZE]) + bytes(data)
+
+
+def roundtrip(data: bytes) -> dict:
+    """Layout check: untile every level and retile it onto zeroed padding; a
+    correct layout reproduces the stock file byte for byte."""
+    texture = layout(data)
+    rebuilt = write_blocks(data[:HEADER_SIZE], read_blocks(data))
+    return {"size": f"{texture.width}x{texture.height}", "format": texture.format,
+            "levels": len(texture.levels), "byte_exact": rebuilt == data,
+            "differing_bytes": sum(a != b for a, b in zip(rebuilt, data)) + abs(len(rebuilt) - len(data))}
+
+
+def main() -> int:
+    import argparse
+    import json
+    from pathlib import Path
+
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    commands = parser.add_subparsers(dest="command", required=True)
+    check = commands.add_parser("roundtrip", help="check that the layout reproduces each texture exactly")
+    check.add_argument("files", nargs="+", type=Path)
+    args = parser.parse_args()
+    exact = True
+    for path in args.files:
+        try:
+            result = {"file": str(path)} | roundtrip(path.read_bytes())
+        except ValueError as error:
+            result = {"file": str(path), "skipped": str(error)}
+        exact &= result.get("byte_exact", True)
+        print(json.dumps(result))
+    return 0 if exact else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
