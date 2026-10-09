@@ -349,6 +349,15 @@ as Marketplace content packages, so they do not depend on DLC-1.
   (default on) stores it the same way once per loaded profile in free roam.
   The map's Y then fast travels to any road, and a fresh launch with the
   setting off keeps it (2026-10-07, commit `fa19331`).
+- [x] Rally All Access Pass (v4, with the Rally Expansion). Its
+  `CRallyAccessPassConsumeAssetTransaction` completion, sub_825D5AB8, calls
+  sub_8253C3C0 on the profile's career (`[tree + 112]`), which unlocks every
+  `CareerEventStyle=4` multi-stage event with `PopularityPointsReq > 0` and
+  skips those already unlocked. `pinyon_shift_dlc_rally_all_access_pass`
+  (default on) makes the same call once per loaded profile in free roam. On
+  the EU save it raised the career's unlocked events from 39 to 43
+  (2026-10-09, `dlc.rally_all_access_pass`); the strings say it opens all
+  seven rallies, not the Horizon Rally Final.
 - [ ] Token amount: trace where the title stores the asset count returned by
   `ForzaUserGetForzaAssetCounts` and how purchases consume it, then let the
   player set the balance (setting or cheat). Verify the showroom's

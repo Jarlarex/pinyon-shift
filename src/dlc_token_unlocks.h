@@ -10,8 +10,9 @@ namespace pinyon_shift::dlc {
 // grant: turning a setting off never takes an unlock away.
 void GrantProfileUnlocks(uint8_t* body, size_t size);
 
-// Called once per title frame: on the v4 build, queues the free-roam grant of
-// Fast Travel Anywhere into the live profile (once per loaded profile).
+// Called once per title frame: on the v4 build, queues the free-roam grants of
+// Fast Travel Anywhere and the Rally All Access Pass into the live profile
+// (each once per loaded profile).
 void UpdateTokenUnlocks();
 
 }  // namespace pinyon_shift::dlc
