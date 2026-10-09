@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Fixed saved photos loading as an upside-down, orange and green copy of the
+  scene. To save a photo, the title resolves it as 8888 into the same memory
+  that holds the depth buffer resolved every frame. Vulkan only read a resolve
+  back into guest RAM when the address and length had not been resolved
+  recently, so the photo was never read back and the title saved stale depth
+  data as the JPEG. Each destination format now has its own record, so the
+  photo resolve is read back and saved correctly. Photos saved before this fix
+  cannot be repaired.
+
 - Default to bloom OFF with a live settings toggle. Suppress its contribution
   through the title's frame-local scale while preserving weather and tone mapping.
 - Default to MSAA OFF on desktop and Android while preserving saved choices;
