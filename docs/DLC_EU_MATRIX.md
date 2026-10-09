@@ -24,18 +24,20 @@ a playtest in the Autoshow and events and are pending.
 | December IGN Car Pack | `FFFFFFFF` | yes | yes | db, effects | yes (player check 2026-10-08) | pending | pending |
 | 2011 Mercedes-Benz SLS AMG | `00000001` | yes | yes | strings | yes (player check 2026-10-08) | pending | pending |
 | 2010 Volkswagen Golf R | `00000001` | yes | yes | strings | yes (player check 2026-10-08) | pending | pending |
-| 2013 Ford Mustang Boss 302 - Pizza Hut Edition | `00000000` | yes | yes | not yet | **no**: the package's own licence table grants no bits, so offer 2800 is unowned (player check 2026-10-08: only the base Boss 302 appears) | — | — |
+| 2013 Ford Mustang Boss 302 - Pizza Hut Edition | `00000001` (catalog grant; the package supplies `00000000`) | yes | yes (`DLCRoot17`) | not yet | pending: offer 2800 and car 1686 owned, visible and selectable in the native entitlement trace (2026-10-09); before the grant only the base Boss 302 appeared (player check 2026-10-08) | pending | pending |
 | Honda Challenge Car Pack | `00000001` | yes | yes | db, effects | yes (player check 2026-10-08) | yes: Civic Si bought | yes: kept after restart |
 | January Recaro Car Pack | `FFFFFFFF` | yes | yes | db, effects | yes (player check 2026-10-08) | pending | pending |
 | 2010 Nissan 370Z | `00000001` | yes | yes | strings | yes (player check 2026-10-08) | pending | pending |
 | 1000 Club Expansion Pack | `00000001` | yes | yes | db, effects | yes (player check 2026-10-08) | pending | pending |
-| Rally Expansion Pack | `00000001` | yes (accepted copy `0D9F6833…`) | yes (`DLCRoot8`) | yes | yes, except the 2003 Ford Focus SVT (Season Pass offer, licence bit 4 not in this package) | yes | yes; stages played through (player check 2026-10-08) |
+| Rally Expansion Pack | `FFFFFFFF` (accepted copy `00000001` + licence-only copy `AA7BD510…`) | yes (accepted copy `0D9F6833…`) | yes (`DLCRoot8`) | yes | yes; the 2003 Ford Focus SVT (Season Pass offer, mask `00000004`) is owned, visible and selectable in the native entitlement trace (2026-10-09), Autoshow check pending | yes, except the Focus SVT (pending) | yes; stages played through (player check 2026-10-08) |
 
 Notes:
 - Purchases persist: a Civic Si and a GMC Vandura bought on the EU save were still owned after a restart (player check 2026-10-08).
 - 1000 Club runs with the update's offline setting on (setup turns it on for the EU disc).
 - "Not yet" means the package mounted but no file was opened before the route ended; the Autoshow check decides.
   The Mustang's licence mask is `00000000` as supplied; licence masks may be changed or modified within the project.
+  The catalog grants it `00000001` (offer 2800), and Rally takes `FFFFFFFF` from its corrupt copy's licence, imported
+  beside the accepted copy without installing that copy's files (2026-10-09).
 
 - Later supplies (2026-10-08): two more Mustang Pizza Hut copies were byte-identical to the first (no licence), and a
   multi-pack archive held the same rejected Rally variant; its second VIP package was new and is installed. A further supply held the accepted Rally package (`0D9F6833…`), now installed; the earlier rejected and truncated copies are no longer needed.
