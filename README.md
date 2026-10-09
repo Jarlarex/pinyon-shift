@@ -40,8 +40,9 @@ an AMD Radeon 860M.
 | Discrete GPU on hybrid laptops | Working (fork of ShiftGlue, see below) |
 | Video memory | Peak 1.3 GB of an 8 GB card in a long session |
 | DLC installed and enabled automatically | 22 packages, see [the DLC matrix](docs/DLC_EU_MATRIX.md) |
-| DLC cars in the Autoshow, bought, driven, kept after a restart | Checked by playing: every supplied car except the 2003 Ford Focus SVT and Mustang Boss 302 Pizza Hut, which are now licensed and owned in the game's entitlement cache but not yet bought and driven; the Challenger SRT8 392 Rockstar's package is not supplied |
-| Rally Expansion (native, from the title update) | Working: stages played through |
+| DLC cars in the Autoshow, bought, driven, kept after a restart | Checked by playing: every supplied car, including the 2003 Ford Focus SVT and the Mustang Boss 302 Pizza Hut (bought and driven 2026-10-09) |
+| Complete car list | All 236 cars of the reference list (218 plus 18 traffic), base game and DLC, are in the game's database; see [the car list check](docs/CAR_LIST_CHECK.md) |
+| Rally Expansion (native, from the title update) | Working: championships finished; one freeze seen once, see [Known issues](#known-issues) |
 | 1000 Club | Offline mode on by default (its online goals are confirmed locally) |
 | Fast Travel Anywhere | Granted automatically on the title update (it was a token-store unlock) |
 | EU disc **without** the title update | Not buildable yet; setup stops and asks for the update |
@@ -178,8 +179,11 @@ the config still forces a specific device.
 
 ## Known issues
 
-- The Challenger SRT8 392 Rockstar is not available: its package is not among
-  the supplied files.
+- Rally froze once on the loading screen after the last stage of a
+  championship, before the results and the save, so that championship's
+  progress was lost. Replaying it finished normally; it has not been
+  reproduced. If it happens again, leave the game on that screen so its state
+  can be captured.
 - The archive extractor crashes on a truncated package instead of reporting it.
 - The EU disc cannot be built without the title update.
 - See upstream's [BUGS.md](BUGS.md) for renderer issues shared with the USA build.
