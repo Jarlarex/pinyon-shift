@@ -1,0 +1,65 @@
+pinyon-shift-fh1-render-test-v1
+# Output-frame paced, synchronized on free roam (title update v4). The
+# offline token service (pinyon_shift_dlc_tokens, DLC-7) starts with 50
+# Tokens unless the state already holds a balance started from 50: pause,
+# SPONSOR CHALLENGES (seventh row), RT BUY POPULARITY SPIKE, OK on the
+# explanation, the 30 minute spike for 1 Token, then the offer's "Current
+# Tokens: N" and A SPEND TOKEN. The purchase is answered from the host
+# balance, the title shows its success popup, and B B return to free roam.
+# The runner checks the dlc.tokens.* events and the private state's
+# user/pinyon_shift_tokens.toml. Run it again with the first run's .state
+# directory as --state-root: the offer then shows what the first run left.
+# expect-token-purchase 2 1
+# expect-freeroam-return free-roam-after
+cvar 2 pinyon_shift_dlc_tokens 50
+input 0 0000 0 0 0 0 0 0
+input 360 1000 0 0 0 0 0 0
+input 366 0000 0 0 0 0 0 0
+input 480 1000 0 0 0 0 0 0
+input 486 0000 0 0 0 0 0 0
+input 600 1000 0 0 0 0 0 0
+input 606 0000 0 0 0 0 0 0
+input 720 1000 0 0 0 0 0 0
+input 726 0000 0 0 0 0 0 0
+wait 900 4000 freeroam
+capture 1200 free-roam
+input 1300 0010 0 0 0 0 0 0
+input 1306 0000 0 0 0 0 0 0
+capture 1420 pause
+input 1460 0002 0 0 0 0 0 0
+input 1466 0000 0 0 0 0 0 0
+input 1505 0002 0 0 0 0 0 0
+input 1511 0000 0 0 0 0 0 0
+input 1550 0002 0 0 0 0 0 0
+input 1556 0000 0 0 0 0 0 0
+input 1595 0002 0 0 0 0 0 0
+input 1601 0000 0 0 0 0 0 0
+input 1640 0002 0 0 0 0 0 0
+input 1646 0000 0 0 0 0 0 0
+input 1685 0002 0 0 0 0 0 0
+input 1691 0000 0 0 0 0 0 0
+input 1750 1000 0 0 0 0 0 0
+input 1756 0000 0 0 0 0 0 0
+capture 1970 sponsor
+input 1990 0000 0 255 0 0 0 0
+input 1996 0000 0 0 0 0 0 0
+capture 2170 spike-explanation
+input 2190 1000 0 0 0 0 0 0
+input 2196 0000 0 0 0 0 0 0
+capture 2370 durations
+input 2390 1000 0 0 0 0 0 0
+input 2396 0000 0 0 0 0 0 0
+capture 2570 offer
+input 2590 1000 0 0 0 0 0 0
+input 2596 0000 0 0 0 0 0 0
+capture 2770 purchased
+input 2790 1000 0 0 0 0 0 0
+input 2796 0000 0 0 0 0 0 0
+capture 2950 sponsor-after
+input 2970 2000 0 0 0 0 0 0
+input 2976 0000 0 0 0 0 0 0
+capture 3130 pause-after
+input 3150 2000 0 0 0 0 0 0
+input 3156 0000 0 0 0 0 0 0
+capture 3330 free-roam-after
+stop 3380

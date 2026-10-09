@@ -152,10 +152,50 @@ registers = ["r3"]
 # Entry of sub_824127B8(service): "is the Forza Horizon server available"
 # ((+9012 == 2 or +13276) and +13205 of [0x833CABB0]). Default-off 1000 Club
 # diagnostic (pinyon_shift_car_challenge_gate_probe) answers yes for every
-# direct caller; otherwise the original body runs.
+# direct caller; the offline token service (pinyon_shift_dlc_tokens) answers
+# yes for the token store's offer, sub_82681698 (lr 0x826816EC), and the
+# Sponsor Challenges screen's RT BUY POPULARITY SPIKE, sub_8283DF18
+# (lr 0x8283DFB4); otherwise the original body runs.
 address = 0x824127B8
 name = "PinyonShiftServerAvailableProbe"
 registers = ["r3", "lr"]
+return_on_true = true
+
+# The offline token service (pinyon_shift_dlc_tokens, src/dlc_tokens.cpp).
+# Each returns to the original body while the setting is -1.
+[[midasm_hook]]
+# Entry of ForzaUI::CCarTokenEnumerator::Refresh (r3 the enumerator), which
+# asks Forza::CConsumableAssetManager for the asset counts (a LIVE request):
+# fill in the host balance instead.
+address = 0x826747D8
+name = "PinyonShiftTokenRefresh"
+registers = ["r3"]
+return_on_true = true
+
+[[midasm_hook]]
+# sub_82681698, the token store's offer, testing the enumerator (r11) for
+# known counts before copying its balance (+8) to the helper (r24): report
+# the host balance there too.
+address = 0x826818DC
+name = "PinyonShiftTokenOffer"
+registers = ["r11", "r24"]
+
+[[midasm_hook]]
+# Entry of sub_82753C68(screen, item), the LIVE sign-in and privilege check
+# that shows its own failure popup: passes for the offer's call
+# (lr 0x826816D8) and the Sponsor Challenges screen's (lr 0x8283DFD0) only.
+address = 0x82753C68
+name = "PinyonShiftTokenStoreSignin"
+registers = ["r3", "lr"]
+return_on_true = true
+
+[[midasm_hook]]
+# Entry of CConsumableAssetManager::ConsumeAsset (r4 user, r5 asset, r6
+# price, r7 the transaction's smart pointer): Tokens (asset 888) are paid
+# from the host balance and the transaction completed on the next frame.
+address = 0x829224F0
+name = "PinyonShiftTokenConsume"
+registers = ["r5", "r6", "r7"]
 return_on_true = true
 
 [[midasm_hook]]

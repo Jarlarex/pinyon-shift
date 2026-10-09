@@ -43,6 +43,7 @@
 #include "cheats.h"
 #include "cheats_map.h"
 #include "dlc_token_unlocks.h"
+#include "dlc_tokens.h"
 #include "dlc_treasure_map.h"
 #include "dlc/rally_progress.h"
 #include "dlc/rally_audio_probe.h"
@@ -2213,6 +2214,11 @@ static void PumpCarChallengeCommits() {
 }
 
 bool PinyonShiftServerAvailableProbe(PPCRegister& r3, uint64_t& lr) {
+  // The offline token store's offer (src/dlc_tokens.cpp), whatever the probe.
+  if (pinyon_shift::dlc::TokenStoreServerCheck(uint32_t(lr))) {
+    r3.u64 = 1;
+    return true;
+  }
   if (!REXCVAR_GET(pinyon_shift_car_challenge_gate_probe)) return false;
   static std::mutex mutex;
   static std::set<uint32_t> callers;

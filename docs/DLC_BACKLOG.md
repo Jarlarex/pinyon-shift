@@ -358,11 +358,42 @@ as Marketplace content packages, so they do not depend on DLC-1.
   the EU save it raised the career's unlocked events from 39 to 43
   (2026-10-09, `dlc.rally_all_access_pass`); the strings say it opens all
   seven rallies, not the Horizon Rally Final.
-- [ ] Token amount: trace where the title stores the asset count returned by
-  `ForzaUserGetForzaAssetCounts` and how purchases consume it, then let the
-  player set the balance (setting or cheat). Verify the showroom's
-  "or N Tokens" prices, a token car purchase, a token-store unlock and the
-  balance after save/reload, without the removed web service.
+- [x] Token amount (v4). Tokens are Forza asset 888. v4's
+  `Forza::CConsumableAssetManager` (`[0x833F4A88]`) sends
+  `GetForzaAssetCounts` and posts the answer as system event 21; its one
+  listener, `ForzaUI::CCarTokenEnumerator` (vtable `0x820331D4`), keeps the
+  balance at `+8` and "counts known" at `+12`, and every token screen asks
+  for counts through its Refresh, sub_826747D8. A purchase is
+  `ConsumeAsset`, sub_829224F0(manager, user, 888, price, transaction):
+  `GetForzaAssetCount`, then `TwoPhaseConsumeForzaAsset`, then the
+  transaction's completion (vtable `+28`, 0 paid, `0x80514501` too few
+  Tokens), which sets its state (`+8`, 2 while pending) and grants the item.
+  The offer, `ForzaUI::CConsumableHelper` sub_82681698, first checks for a
+  LIVE user (sub_82753C68) and the Forza server (sub_824127B8); the Sponsor
+  Challenges screen's RT BUY POPULARITY SPIKE (sub_8283DF18) checks both
+  again. `pinyon_shift_dlc_tokens` (default `-1`, off) is the balance the
+  store starts with: midasm hooks (`config/rexglue/analysis-v4/v4-additions.toml`,
+  `src/dlc_tokens.cpp`) report the host balance from Refresh and at the
+  offer, pass those checks for these callers only, and answer `ConsumeAsset`
+  for Tokens on the next frame through the transaction's own completion.
+  What is left is kept in `user/pinyon_shift_tokens.toml` (`user-modded/`
+  with mods), not in the encrypted profile, which never held a balance; a
+  setting other than the one the saved balance started from starts again
+  from the setting. Verified 2026-10-09 with
+  `config/render-tests/fh1-token-store.fh1test` from `.local/preview`
+  (EU + v4, Vulkan): the offer read "Current Tokens: 50", a 30 minute
+  Popularity Spike cost 1 and activated in free roam, and the file held 49;
+  the route run again from that run's private state loaded 49, offered 49
+  and left 48 (`token_purchase` in the results, `dlc.tokens.*` events). With
+  the setting off the screen still says the server is unavailable and no
+  file is written; with 0 Tokens the title's own "INSUFFICIENT TOKENS!"
+  appears, and its offer to buy more Tokens still asks for an Xbox LIVE
+  profile. Not exercised: no car has a Token price here (the
+  `ContentRestrictions` table behind the showroom's "or N Tokens" is empty
+  in v4's database and absent from all installed DLC merge databases), and
+  the only save already owns the Treasure Map (5 Tokens, the same offer and
+  purchase path). `ForzaUI::CMarketplaceHome` keeps its own server check,
+  and the base-disc build has no token service.
 
 **Done when:** both work offline on Vulkan from a pinned seed, survive
 restart, and turning the options off never removes what was already granted
