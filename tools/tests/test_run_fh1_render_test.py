@@ -832,6 +832,36 @@ class Fh1RenderTestRunnerTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 MODULE.rally_transition_summary([award, running | changes, later | changes], 1, 2)
 
+    def test_token_purchase_pays_the_offered_balance_and_saves_it(self):
+        loaded = dict(event="dlc.tokens.wallet", action="loaded", start="-1", balance="0")
+        started = dict(event="dlc.tokens.wallet", action="started", balance="50")
+        offer = dict(event="dlc.tokens.offer", item="2", price="1", balance="50")
+        paid = dict(event="dlc.tokens.consume", action="paid", price="1", balance_before="50",
+                    balance_after="49", state="0")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "user").mkdir()
+            wallet = root / "user" / "pinyon_shift_tokens.toml"
+            wallet.write_text("version = 1\nstart = 50\nbalance = 49\n", encoding="utf-8")
+            result = MODULE.token_purchase_summary([loaded, started, offer, paid], root, 2, 1)
+            self.assertEqual((result["offered"], result["after"], result["restored"]), (50, 49, False))
+            # After a restart the balance comes from the file, not the setting.
+            restored = MODULE.token_purchase_summary(
+                [loaded | dict(start="50", balance="50"), offer, paid], root, 2, 1)
+            self.assertTrue(restored["restored"])
+            for events in ([loaded, started, paid], [loaded, started, offer],
+                           [loaded, started, paid, offer], [loaded, offer, paid],
+                           [loaded, started, offer, paid | dict(state="3")],
+                           [loaded, started, offer, paid | dict(balance_after="50")],
+                           [loaded, started, offer | dict(balance="40"), paid]):
+                with self.assertRaises(RuntimeError):
+                    MODULE.token_purchase_summary(events, root, 2, 1)
+            with self.assertRaises(RuntimeError):
+                MODULE.token_purchase_summary([loaded, started, offer, paid], root, 1, 5)
+            wallet.write_text("version = 1\nstart = 50\nbalance = 50\n", encoding="utf-8")
+            with self.assertRaisesRegex(RuntimeError, "saved Token balance"):
+                MODULE.token_purchase_summary([loaded, started, offer, paid], root, 2, 1)
+
     def test_free_roam_return_rejects_results_screen_and_missing_capture(self):
         capture = dict(event="fh1.render_test.capture", name="stage-return", game_mode="17")
         MODULE.require_free_roam_capture([capture], "stage-return")

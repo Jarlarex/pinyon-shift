@@ -1308,6 +1308,34 @@ def rally_stage_reload_summary(events: list[dict], state: Path, route: int,
     raise RuntimeError("Rally stage reload lacks an advancing native race")
 
 
+def token_purchase_summary(events: list[dict], state_root: Path, item: int, price: int) -> dict:
+    """One offline Token purchase (DLC-7): the offer showed the host balance,
+    the purchase paid the price from it and completed the title's transaction,
+    and the private state's balance file holds what was left."""
+    def named(name: str, **fields: str) -> list[dict]:
+        return [e for e in events if e.get("event") == name and
+                all(e.get(key) == value for key, value in fields.items())]
+    loaded = named("dlc.tokens.wallet", action="loaded")
+    started = named("dlc.tokens.wallet", action="started")
+    offers = named("dlc.tokens.offer", item=str(item), price=str(price))
+    paid = named("dlc.tokens.consume", action="paid")
+    if len(loaded) != 1 or len(offers) != 1 or len(paid) != 1:
+        raise RuntimeError("expected one balance load, one Token offer and one paid purchase")
+    opening = int((started or loaded)[-1]["balance"])
+    offered, after = int(offers[0]["balance"]), int(paid[0]["balance_after"])
+    if (offered != opening or int(paid[0]["balance_before"]) != offered or
+            int(paid[0]["price"]) != price or after != offered - price or
+            paid[0].get("state") != "0" or events.index(offers[0]) > events.index(paid[0])):
+        raise RuntimeError("the Token purchase did not pay the offered balance")
+    path = state_root / "user" / "pinyon_shift_tokens.toml"
+    saved = tomllib.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+    if saved.get("version") != 1 or saved.get("balance") != after:
+        raise RuntimeError("the saved Token balance does not match the purchase")
+    # Without a "started" event the balance came from an earlier run's file.
+    return dict(item=item, price=price, offered=offered, after=after, start=saved.get("start"),
+                restored=not started, path=str(path))
+
+
 def require_free_roam_capture(events: list[dict], name: str) -> None:
     captures = [event for event in events if event.get("event") == "fh1.render_test.capture"
                 and event.get("name") == name]
@@ -1637,6 +1665,12 @@ def run(args: argparse.Namespace) -> dict[str, object]:
     if expect_rally_builtin and expect_rally_normal_entry:
         raise ValueError("normal Rally entry cannot use the private built-in probe")
     expect_race_finish = expect_rally_progress or "# expect-race-finish" in scenario_lines
+    # expect-token-purchase <item> <price>: one offline Token purchase (DLC-7).
+    token_purchases = [line.split()[2:] for line in scenario_lines
+                       if line.startswith("# expect-token-purchase ")]
+    if len(token_purchases) > 1 or any(len(fields) != 2 or not all(f.isdigit() for f in fields)
+                                       for fields in token_purchases):
+        raise ValueError("expect-token-purchase requires one item and price")
     state_root = args.state_root.resolve()
     (
         captures,
@@ -1849,6 +1883,8 @@ def run(args: argparse.Namespace) -> dict[str, object]:
         if line.startswith("# expect-freeroam-return "):
             require_free_roam_capture(events, line.split()[2])
     race_finish = race_finish_summary(events) if expect_race_finish else None
+    token_purchase = (token_purchase_summary(events, run_state_root, *map(int, token_purchases[0]))
+                      if token_purchases else None)
     rally_progress = rally_progress_summary(events, run_state_root, race_finish) if expect_rally_progress and not series else None
     rally_series = rally_series_summary(events, run_state_root, series[0]) if series else None
     rally_return_entry = rally_return_entry_summary(events) if expect_rally_return_entry else None
@@ -2134,6 +2170,7 @@ def run(args: argparse.Namespace) -> dict[str, object]:
         "capture_mae": capture_mae,
         "race_hud": race_hud,
         "race_finish": race_finish,
+        "token_purchase": token_purchase,
         "rally_progress": rally_progress,
         "rally_transitions": rally_transitions,
         "rally_retirements": rally_retirements,
