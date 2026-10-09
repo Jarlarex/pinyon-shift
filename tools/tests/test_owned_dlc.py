@@ -125,6 +125,18 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(mustang["content_id"], "0390E8868FD0F18657144FA6F6B1329D980E8D02")
         self.assertEqual(mustang["accepted"][0]["sha256"],
                          "C19665C453830AD41D8D6A970C981856AF4BF3E994BFE31EDC554F885D62F811")
+        # Its licence is empty; offer 2800 needs ContentOffers.LicenseMask 1.
+        self.assertEqual(mustang["accepted"][0]["license_mask"], "00000000")
+        self.assertEqual(mustang["license_grant"]["mask"], "00000001")
+
+    def test_catalog_licence_grants_are_explicit(self):
+        catalog = json.loads((ROOT / "config/supported-dlc.json").read_text(encoding="utf-8"))
+        for package in catalog["packages"]:
+            if "license_grant" in package:
+                grant = package["license_grant"]
+                self.assertRegex(grant["mask"], r"\A[0-9A-F]{8}\Z")
+                self.assertNotEqual(grant["mask"], "00000000")
+                self.assertTrue(grant["reason"].strip())
 
 
 if __name__ == "__main__":

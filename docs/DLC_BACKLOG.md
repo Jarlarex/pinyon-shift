@@ -182,6 +182,12 @@ assuming the supplied v4 works with every base dump.
   the main offer is owned and the season-pass Focus SVT is excluded. Other
   packages remain unqualified. One owned Escort purchase and fresh reload now
   pass on Vulkan with the complete saved garage; see the dated receipt below.
+  The Pizza Hut Mustang's only supplied package licenses nothing (`00000000`),
+  while its offer `4D5309C9FD0AB400` (`2800.puboffer`, car 1686) needs
+  `ContentOffers.LicenseMask` `00000001`. Its catalog entry carries a
+  `license_grant` of `00000001`, which the import ORs into that package's
+  header mask only. An install made before the grant fails verification on
+  enable and picks the grant up when the package is imported again.
 - [ ] Use one small representative car pack to verify enumeration, database
   merge, car purchase, garage rendering, driving, upgrades and save/reload.
 - [ ] Check repeated import, wrong-title packages, interrupted import, missing

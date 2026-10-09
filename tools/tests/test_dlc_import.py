@@ -188,6 +188,46 @@ class DlcImportTests(unittest.TestCase):
             self.assertEqual(rows[0]["license_mask"], "00000003")
             self.assertEqual(len(rows[0]["variants"]), 2)
 
+    def test_catalog_licence_grant_widens_new_and_existing_imports(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, manifest, package = self.fixture(root)
+            # Like the Pizza Hut Mustang: the only supplied variant licenses nothing.
+            package["accepted"][0]["license_mask"] = "00000000"
+            extractions = []
+            def extract(args, **kwargs):
+                extractions.append(args[2])
+                destination = Path(args[3])
+                folder = destination / dlc.CONTENT / "00000002" / package["package_id"]
+                folder.mkdir(parents=True)
+                (folder / "offer.puboffer").write_bytes(b"owned")
+                sdk_header = destination / dlc.CONTENT / "Headers" / "00000002" / (package["package_id"] + ".header")
+                sdk_header.parent.mkdir(parents=True)
+                # The SDK omits the mask field when the package grants no bits.
+                sdk_header.write_bytes(bytes(328))
+                return subprocess.CompletedProcess(args, 0, "", "")
+            with patch.object(dlc, "catalog", return_value=manifest), \
+                    patch.object(dlc.subprocess, "check_output", return_value=b""), \
+                    patch.object(dlc.subprocess, "run", side_effect=extract):
+                state = root / "state"
+                _, _, header = dlc.package_paths(state, package["package_id"])
+                self.assertEqual(dlc.import_content(source, state, root / "extractor")[0]["license_mask"], "00000000")
+                self.assertEqual(int.from_bytes(header.read_bytes()[328:332], "little"), 0)
+                package["license_grant"] = dict(mask="00000001", reason="test")
+                # An install made before the grant must be re-imported, not silently widened.
+                with self.assertRaisesRegex(ValueError, "licence changed"):
+                    dlc.set_enabled(state, package["package_id"], True)
+                rows = dlc.import_content(source, state, root / "extractor")
+                self.assertEqual(len(extractions), 1)
+                self.assertEqual(rows[0]["license_mask"], "00000001")
+                self.assertEqual(int.from_bytes(header.read_bytes()[328:332], "little"), 1)
+                self.assertTrue(dlc.set_enabled(state, package["package_id"], True)[0]["enabled"])
+                fresh = root / "fresh"
+                _, _, header = dlc.package_paths(fresh, package["package_id"])
+                self.assertEqual(dlc.import_content(source, fresh, root / "extractor")[0]["license_mask"], "00000001")
+                self.assertEqual(int.from_bytes(header.read_bytes()[328:332], "little"), 1)
+                self.assertTrue(dlc.set_enabled(fresh, package["package_id"], True)[0]["enabled"])
+
     def test_damaged_record_does_not_hide_other_packages_or_prevent_disable(self):
         with tempfile.TemporaryDirectory() as directory:
             state = Path(directory)

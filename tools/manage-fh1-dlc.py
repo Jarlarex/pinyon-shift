@@ -120,11 +120,12 @@ def record_variants(package: dict, shas: list[str]) -> list[dict]:
     return variants
 
 
-def combined_mask(variants: list[dict]) -> str:
+def combined_mask(package: dict, variants: list[dict]) -> str:
     """Several verified variants of one package share a payload and differ
     only in the purchase recorded in their licence; owning each grants the
-    union, as the original console would after both purchases."""
-    mask = 0
+    union, as the original console would after both purchases. A catalog
+    licence grant adds bits that no supplied variant of the package carries."""
+    mask = int(package.get("license_grant", {}).get("mask", "0"), 16)
     for variant in variants:
         mask |= int(variant["license_mask"], 16)
     return f"{mask:08X}"
@@ -239,7 +240,7 @@ def verified_content(state: Path, id: str, *, require_enabled: bool = False) -> 
     shas = record.get("variants", [record.get("sha256")])
     if not isinstance(shas, list) or record.get("sha256") not in shas:
         raise ValueError("import record is damaged; import the original package again")
-    mask = combined_mask(record_variants(package, shas))
+    mask = combined_mask(package, record_variants(package, shas))
     data = header.read_bytes()
     if (len(data) not in (328, 332) or
             record.get("header_sha256") != hashlib.sha256(data).hexdigest().upper() or
@@ -334,7 +335,7 @@ def import_content(source: Path, state: Path, extractor: Path) -> list[dict]:
             primary, owned = previous.get(id, (variant["sha256"], []))
             shas = {v["sha256"] for v in owned + variants}
             variants = [v for v in package["accepted"] if v["sha256"] in shas]
-            mask = combined_mask(variants)
+            mask = combined_mask(package, variants)
             installed = enabled if enabled.exists() else disabled
             if id not in repair and installed.exists() and header.is_file():
                 record = import_record(record_path)

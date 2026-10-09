@@ -420,6 +420,10 @@
       "payload_sha256": "60FA6CE23469D78F248E6424FF1DF7F1A8C987E63FABAA57720D0D6DBAF5E374",
       "file_count": 8,
       "expanded_size": 14478848,
+      "license_grant": {
+        "mask": "00000001",
+        "reason": "The package licence carries no bits, but its offer 4D5309C9FD0AB400 (PubOfferingID 2800, car 1686) needs ContentOffers.LicenseMask 00000001."
+      },
       "accepted": [
         {
           "size": 14639104,

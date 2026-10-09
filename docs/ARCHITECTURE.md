@@ -66,7 +66,8 @@ enforces it with `config/repository-policy.json`.
 - **DLC import:** `tools/manage-fh1-dlc.py` + `tools/manage-dlc.ps1`, launcher
   DLC panel. Accepts raw packages, folders or ZIPs; validates against
   `config/supported-dlc.json` (21 identities, 30 accepted whole-package
-  hashes, licence masks, payload hashes); imports atomically; starts disabled.
+  hashes, licence masks, payload hashes, per-package licence grants); imports
+  atomically; starts disabled.
   Installs under `<state>/user/0000000000000000/4D5309C9/00000002`.
 - **Rally on base disc:** `tools/prepare-fh1-rally.py` builds an adapter cache
   from the owned package + base-disc inputs; `src/dlc/rally_*`.
