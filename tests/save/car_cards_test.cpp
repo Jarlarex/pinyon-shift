@@ -48,10 +48,12 @@ void Write(const fs::path& path, const std::vector<uint8_t>& bytes) {
 }  // namespace
 
 int main() {
-  // Sizes from real cards: rendered 28,605 to 34,123 bytes, striped 275,528
-  // to 559,241 of 884,788.
+  // Sizes from real cards: rendered 28,605 to 164,109 bytes (the GMC
+  // Vandura's), striped 275,528 to 559,241 of 884,788.
   CHECK(!IsStripedCarCard(Card(28605)));
   CHECK(!IsStripedCarCard(Card(34123)));
+  CHECK(!IsStripedCarCard(Card(130587)));
+  CHECK(!IsStripedCarCard(Card(164109)));
   CHECK(IsStripedCarCard(Card(275528)));
   CHECK(IsStripedCarCard(Card(559241)));
   std::vector<uint8_t> not_a_card = Card(559241);

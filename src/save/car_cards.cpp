@@ -34,8 +34,9 @@ bool IsStripedCarCard(std::span<const uint8_t> header) {
   }
   const uint32_t uncompressed = LoadBe32(header.data() + 8);
   const uint32_t compressed = LoadBe32(header.data() + 12);
-  // Rendered cards measure 3-4%, striped ones 31-63%.
-  return uncompressed != 0 && uint64_t(compressed) * 100 > uint64_t(uncompressed) * 15;
+  // Rendered cards measure 3-19% (a white GMC Vandura 18.5%), striped ones
+  // 31-63%.
+  return uncompressed != 0 && uint64_t(compressed) * 100 > uint64_t(uncompressed) * 25;
 }
 
 size_t QuarantineStripedCarCards(const fs::path& user_root, const fs::path& backup_root) {
