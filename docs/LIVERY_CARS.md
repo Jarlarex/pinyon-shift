@@ -12,7 +12,8 @@ No game files, generated cars or livery art are committed; livery art lives in
 |---|---|---|
 | `xds-codec` | `tools/fh1_xds.py` | done (layout, read/write, decode, encode, in-game check) |
 | `car-clone` | `tools/clone-fh1-car.py` | done (sources, rows, names, files, CLI; car IDs in `config/livery-cars/ids.json`) |
-| `livery-paint`, `livery-package`, `promo-cars` | — | planned |
+| `livery-paint` | `tools/paint-fh1-livery.py` | in progress (repaint, panel geometry, recipes, `paint`) |
+| `livery-package`, `promo-cars` | — | planned |
 
 ## Car textures (`tools/fh1_xds.py`)
 
@@ -133,3 +134,33 @@ audio tuning files are renamed into `media/audio/cars/CarModelTuning/` and
 | 2026-10-10 | `clone_files` on the Boss 302 under the Pizza Hut's media name, against Turn 10's Pizza Hut package | **58 files with exactly Turn 10's 58 names**; 46 byte-identical; the other 12 are files Turn 10 re-exported or repainted (the three main carbins and their stripped copies, `BuildNumber.txt`, the build report, `Dash_*.bgf`, `nodamage.xds`, `nodamage_LOD0.xds`); our rewritten `.fbf` differs from Turn 10's only in its own font and placeholder text. The Pizza Hut's `damage*.xds` are the Boss 302's unchanged |
 | 2026-10-10 | `clone_files` on the Challenger (1557) and FR-S (1548) | 67 and 58 files (63.4 and 33.0 MB), 28 renamed each, one `.fbf` rewritten each; gauge textures kept (`DOD_SRT8_09_GEARBASE.XDS`, `SCI_FRS_13_TXT_MPH.XDS`, …); the six livery stock cars' archives embed their folder only in the dash `.fbf` (the RUF has no dash) |
 | 2026-10-10 | CLI: 1557 → 3001 (`DOD_ChallengerSRT8392_RSE_12`) and 1548 → 3002 (`SCI_FRS_MEG_13`) into scratch folders | **21 s each**; 195 rows in 47 tables and 67 files (61 MB), 171 rows in 48 tables and 58 files (32 MB); keys 6002/6003 and 6004/6005; the **84 source files hashed before and after are unchanged**. Refused as expected: an existing output, ID 3008 (not reserved), 1548 → 3001 (reserved for 1557), media names `SCI_FRS_13` (a disc car) and `FOR_MustangBoss302_PZA_13` (a package car); nothing left behind |
+
+## Painting a livery (`tools/paint-fh1-livery.py`)
+
+Turn 10's livery cars (the Pizza Hut Mustang and the Shelby GT500 Rockstar
+Energy) carry their livery in the colour of the paint area, the texels whose
+alpha is 0, of `nodamage.xds` and `nodamage_LOD0.xds`, with alpha and the
+damage textures stock and `HasRaceLivery = 1`. A livery here is painted the
+same way:
+
+```powershell
+python tools\paint-fh1-livery.py paint config\livery-cars\<name>.json --clone <car-clone output> `
+    [--art .local\livery-art\<name>] [--preview <dir>]
+```
+
+A recipe names its car (checked against `config/livery-cars/ids.json`), the
+stock car's media name (whose panel table, `config/livery-cars/panels/<StockMedia>.json`,
+gives each body panel an outline and a frame of three corners) and ordered
+layers: `fill` (panels or the whole paint area), `band` (a rectangle in panel
+coordinates) and `image` (an 8-bit RGBA PNG from the local art folder, placed by
+centre, width, rotation and mirror). Each layer is clipped to its outline and
+the paint area unless it is `opaque`, and only colour is written. Both textures
+are painted from the same normalised recipe, each against its own alpha, and
+repainted through `fh1_xds.repaint_xds`; they replace the clone's copies
+together once both are ready.
+
+### Evidence
+
+| Date | Check | Result |
+|---|---|---|
+| 2026-10-11 | `paint` with a six-layer test recipe (base fill, two bands on the top, synthetic disc art on both sides and the hood) into two copies of the scratch 3001 clone, with rough panel rectangles | **80–85 s** for both textures (18 s at 1024², 61–65 s at 2048²; spec: 3 min); the two runs **byte-identical**; alpha **identical at every level** and every block's alpha half kept. Every re-encoded block holds a painted texel; opaque texels sharing such a block with the paint area move by DXT re-encoding only (1.7–2.9% of them, mean 3–7/255, 95th percentile 9–21, at most 148 at a few badge edges) |

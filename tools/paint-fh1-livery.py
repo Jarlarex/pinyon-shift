@@ -16,10 +16,15 @@ the car's front to 1 at its rear, and v = 0 at the panel's top to 1 at its
 bottom (for the top panel, "top" is the car's left; for the front and rear,
 u runs from the car's left to its right).
 """
+import argparse
+import hashlib
 import importlib.util
 import json
 import math
+import os
 import re
+import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple
@@ -405,3 +410,99 @@ def compose(stock: bytes, width: int, height: int, recipe: Recipe) -> bytes:
         else:
             _image(out, mask, width, height, layer, recipe.panels[layer["panel"]], recipe.art[layer["file"]])
     return bytes(out)
+
+
+# -- painting a clone -------------------------------------------------------
+
+BODY_TEXTURES = ("nodamage.xds", "nodamage_LOD0.xds")
+
+
+def _find(folder: Path, name: str) -> Path | None:
+    """`folder/name` in any case (car archives spell their members variously)."""
+    if not folder.is_dir():
+        return None
+    return next((path for path in folder.iterdir() if path.name.lower() == name.lower()), None)
+
+
+def _opaque_png(width: int, height: int, rgba: bytes) -> bytes:
+    shown = bytearray(rgba)
+    shown[3::4] = b"\xff" * (width * height)
+    return xds.encode_png(width, height, bytes(shown))
+
+
+def paint_livery(recipe: Recipe, clone_dir: Path, preview: Path | None = None) -> dict:
+    """Paint `recipe` into a car-clone staging folder: its media/cars/<media>/nodamage.xds and
+    nodamage_LOD0.xds are repainted through `fh1_xds.repaint_xds` (colour only, untouched blocks
+    kept) and replaced together once both are ready, so a failure leaves the clone unchanged.
+    `preview` receives flat PNGs of the painted textures. Returns the report."""
+    started = time.perf_counter()
+    media = recipe.car["media_name"]
+    cars = _find(Path(clone_dir) / "media", "cars")
+    folder = _find(cars, media) if cars else None
+    if folder is None:
+        raise ValueError(f"{clone_dir} holds no media/cars/{media} folder; clone the car first")
+    painted, textures = [], []
+    for name in BODY_TEXTURES:
+        path = _find(folder, name)
+        if path is None:
+            raise ValueError(f"the clone has no {name} in {folder}")
+        texture_started = time.perf_counter()
+        stock = path.read_bytes()
+        texture = xds.layout(stock)
+        width, height = texture.width, texture.height
+        level0 = xds.decode_level(stock, 0)
+        image = compose(level0, width, height, recipe)
+        data = xds.repaint_xds(stock, image)
+        # Alpha is unchanged, so a texel changed when its four bytes did.
+        changed = bytes(a != b for a, b in zip(memoryview(image).cast("I"), memoryview(level0).cast("I")))
+        panels = {panel_name: _and(changed, bytes(polygon_mask(panel.outline, width, height))).count(1)
+                  for panel_name, panel in recipe.panels.items()}
+        blocks = [sum(a[i:i + 16] != b[i:i + 16] for i in range(0, len(a), 16))
+                  for a, b in zip(xds.read_blocks(stock), xds.read_blocks(data))]
+        painted.append((path, data, width, height, image))
+        textures.append({"file": path.relative_to(clone_dir).as_posix(), "size": f"{width}x{height}",
+                         "texels_changed": changed.count(1), "panels": panels, "blocks_reencoded": blocks,
+                         "sha256": hashlib.sha256(data).hexdigest(),
+                         "seconds": round(time.perf_counter() - texture_started, 1)})
+    temporary = []
+    try:
+        for path, data, *_ in painted:
+            temporary.append(path.with_name(path.name + ".painting"))
+            temporary[-1].write_bytes(data)
+        for (path, *_), staged in zip(painted, temporary):
+            os.replace(staged, path)
+    finally:
+        for staged in temporary:
+            staged.unlink(missing_ok=True)
+    if preview is not None:
+        Path(preview).mkdir(parents=True, exist_ok=True)
+        for path, _, width, height, image in painted:
+            (Path(preview) / f"{media}_{path.stem}.png").write_bytes(_opaque_png(width, height, image))
+    return {"recipe": recipe.name, "car": recipe.car, "clone": str(clone_dir), "layers": len(recipe.layers),
+            "textures": textures, "seconds": round(time.perf_counter() - started, 1)}
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    commands = parser.add_subparsers(dest="command", required=True)
+    paint = commands.add_parser("paint", help="paint a recipe into a car-clone staging folder")
+    paint.add_argument("recipe", type=Path, help="config/livery-cars/<name>.json")
+    paint.add_argument("--clone", type=Path, required=True, help="the clone-fh1-car.py output folder")
+    paint.add_argument("--art", type=Path, help="the art folder (default: .local/livery-art/<recipe name>)")
+    paint.add_argument("--preview", type=Path, help="write flat PNGs of the painted textures here")
+    for command in (paint,):
+        command.add_argument("--panels", type=Path, default=PANEL_TABLES, help=argparse.SUPPRESS)
+        command.add_argument("--ids", type=Path, default=ID_TABLE, help=argparse.SUPPRESS)
+    args = parser.parse_args(argv)
+    try:
+        recipe = load_recipe(args.recipe, art_dir=args.art, panel_tables=args.panels, id_table=args.ids)
+        report = paint_livery(recipe, args.clone, preview=args.preview)
+    except (OSError, ValueError) as error:
+        print(str(error), file=sys.stderr)
+        return 1
+    print(json.dumps(report, indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -256,6 +256,12 @@ def decode_levels(data: bytes) -> list[bytes]:
     return [_decode_level(texture, level, blocks) for level, blocks in zip(texture.levels, read_blocks(data))]
 
 
+def decode_level(data: bytes, index: int = 0) -> bytes:
+    """One mip level as RGBA8 rows."""
+    texture = layout(data)
+    return _decode_level(texture, texture.levels[index], read_blocks(data)[index])
+
+
 _PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
 

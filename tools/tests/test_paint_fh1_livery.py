@@ -1,9 +1,13 @@
 """Painting a livery into a cloned car's body textures, with synthetic textures and art only."""
+import hashlib
 import importlib.util
+import io
 import json
 import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from unittest.mock import patch
 
 SPEC = importlib.util.spec_from_file_location("paint_fh1_livery", Path(__file__).parents[1] / "paint-fh1-livery.py")
 paint = importlib.util.module_from_spec(SPEC)
@@ -273,6 +277,108 @@ class RecipeTests(unittest.TestCase):
         layer = {"image": str(self.setup.art / "flag.png"), "panel": "left", "at": [0.5, 0.5], "width": 0.5}
         with self.assertRaisesRegex(ValueError, "plain file name"):
             self.setup.recipe([layer])
+
+
+XDS_TESTS = importlib.util.spec_from_file_location("test_fh1_xds_helpers", Path(__file__).with_name("test_fh1_xds.py"))
+xds_tests = importlib.util.module_from_spec(XDS_TESTS)
+XDS_TESTS.loader.exec_module(xds_tests)
+
+
+def body_texture(size):
+    """A DXT5 body texture like the stock ones: white paint area (alpha 0), an opaque badge top-left."""
+    rgba = b"".join(bytes((90, 90, 90, 255)) if x < size // 4 and y < size // 4 else bytes((*WHITE, 0))
+                    for y in range(size) for x in range(size))
+    return xds.write_xds(xds_tests.header(size, size, xds_tests.DXT5, size.bit_length(), 0x4), rgba, size, size)
+
+
+class PaintTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.setup = RecipeSetup(Path(self.temporary.name))
+        self.clone = Path(self.temporary.name) / "clone"
+        self.car = self.clone / "media/cars/DOD_Car_RSE_12"
+        self.car.mkdir(parents=True)
+        self.stock = {"nodamage.xds": body_texture(64), "nodamage_LOD0.xds": body_texture(128)}
+        for name, data in self.stock.items():
+            (self.car / name).write_bytes(data)
+        (self.car / "damage.xds").write_bytes(b"damage stays stock")
+        self.layers = [{"fill": "FF0000", "panels": ["right"]}]
+
+    def test_both_textures_are_repainted_and_only_inside_the_panel(self):
+        report = paint.paint_livery(self.setup.recipe(self.layers), self.clone)
+        for name, size in (("nodamage.xds", 64), ("nodamage_LOD0.xds", 128)):
+            data = (self.car / name).read_bytes()
+            level0 = xds.decode_levels(data)[0]
+            self.assertEqual(pixel(level0, size * 3 // 4, size * 3 // 4, size)[:3], (255, 0, 0))
+            self.assertEqual(pixel(level0, size // 8, size // 2 + 2, size)[:3], WHITE)
+            self.assertEqual([level[3::4] for level in xds.decode_levels(data)],
+                             [level[3::4] for level in xds.decode_levels(self.stock[name])])
+            stock_level0 = xds.read_blocks(self.stock[name])[0]
+            blocks = xds.read_blocks(data)[0]
+            columns = size // 4
+            for index in range(len(blocks) // 16):
+                bx, by = index % columns, index // columns
+                if bx < columns // 2 or by < columns // 2:      # outside the right panel
+                    self.assertEqual(blocks[16 * index:16 * index + 16], stock_level0[16 * index:16 * index + 16])
+        self.assertEqual((self.car / "damage.xds").read_bytes(), b"damage stays stock")
+        textures = {texture["file"]: texture for texture in report["textures"]}
+        lod0 = textures["media/cars/DOD_Car_RSE_12/nodamage_LOD0.xds"]
+        self.assertEqual(lod0["size"], "128x128")
+        self.assertEqual(lod0["panels"], {"right": 64 * 64, "left": 0})
+        self.assertEqual(lod0["sha256"], hashlib.sha256((self.car / "nodamage_LOD0.xds").read_bytes()).hexdigest())
+        self.assertGreater(lod0["blocks_reencoded"][0], 0)
+        self.assertEqual(report["car"]["new_id"], 3001)
+
+    def test_painting_twice_gives_the_same_bytes(self):
+        paint.paint_livery(self.setup.recipe(self.layers), self.clone)
+        first = {name: (self.car / name).read_bytes() for name in self.stock}
+        for name, data in self.stock.items():
+            (self.car / name).write_bytes(data)
+        paint.paint_livery(self.setup.recipe(self.layers), self.clone)
+        self.assertEqual({name: (self.car / name).read_bytes() for name in self.stock}, first)
+
+    def test_previews_show_the_painted_textures(self):
+        preview = Path(self.temporary.name) / "preview"
+        paint.paint_livery(self.setup.recipe(self.layers), self.clone, preview=preview)
+        width, height, rgba = xds.decode_png((preview / "DOD_Car_RSE_12_nodamage.png").read_bytes())
+        self.assertEqual((width, height), (64, 64))
+        self.assertEqual(pixel(rgba, 48, 48, 64), (255, 0, 0, 255))
+
+    def test_a_clone_without_the_car_or_its_textures_is_refused(self):
+        with self.assertRaisesRegex(ValueError, "no media/cars/DOD_Car_RSE_12"):
+            paint.paint_livery(self.setup.recipe(self.layers), Path(self.temporary.name) / "elsewhere")
+        (self.car / "nodamage_LOD0.xds").unlink()
+        with self.assertRaisesRegex(ValueError, "nodamage_LOD0.xds"):
+            paint.paint_livery(self.setup.recipe(self.layers), self.clone)
+        self.assertEqual((self.car / "nodamage.xds").read_bytes(), self.stock["nodamage.xds"])
+
+    def test_a_failure_leaves_the_clone_unchanged(self):
+        def fail(stock, rgba):
+            calls.append(stock)
+            if len(calls) == 2:            # the second texture, after the first was already painted
+                raise ValueError("encoder stopped")
+            return original(stock, rgba)
+
+        calls, original = [], paint.xds.repaint_xds
+        with patch.object(paint.xds, "repaint_xds", side_effect=fail):
+            with self.assertRaisesRegex(ValueError, "encoder stopped"):
+                paint.paint_livery(self.setup.recipe(self.layers), self.clone)
+        self.assertEqual({name: (self.car / name).read_bytes() for name in self.stock}, self.stock)
+        self.assertEqual(sorted(p.name for p in self.car.iterdir()), ["damage.xds", "nodamage.xds", "nodamage_LOD0.xds"])
+
+    def test_the_paint_command_prints_its_report(self):
+        recipe = self.setup.root / "test-livery.json"
+        self.setup.recipe(self.layers)
+        args = ["paint", str(recipe), "--clone", str(self.clone), "--art", str(self.setup.art),
+                "--panels", str(self.setup.panels), "--ids", str(self.setup.ids)]
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            self.assertEqual(paint.main(args), 0)
+        self.assertEqual(json.loads(out.getvalue())["recipe"], "test-livery")
+        with redirect_stdout(io.StringIO()), redirect_stderr(err):
+            self.assertEqual(paint.main(args[:3] + [str(self.clone / "missing")] + args[4:]), 1)
+        self.assertIn("no media/cars/DOD_Car_RSE_12", err.getvalue())
 
 
 if __name__ == "__main__":

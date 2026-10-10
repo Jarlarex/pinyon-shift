@@ -209,6 +209,12 @@ class DecodeTests(unittest.TestCase):
         rgba = xds.decode_levels(xds.write_blocks(head, distinct_blocks(layout)))
         self.assertEqual([len(level) for level in rgba], [8 * 8 * 4, 4 * 4 * 4, 2 * 2 * 4, 4])
 
+    def test_one_level_decodes_like_the_whole_chain(self):
+        head = header(64, 64, DXT5, 7, 0x4)
+        data = xds.write_xds(head, b"".join(bytes((x * 4, y * 4, 9, 255)) for y in range(64) for x in range(64)), 64, 64)
+        levels = xds.decode_levels(data)
+        self.assertEqual([xds.decode_level(data, index) for index in range(7)], levels)
+
     def test_png_holds_the_decoded_level(self):
         png = xds.encode_png(2, 1, bytes([1, 2, 3, 4, 5, 6, 7, 8]))
         self.assertEqual(png[:8], b"\x89PNG\r\n\x1a\n")
