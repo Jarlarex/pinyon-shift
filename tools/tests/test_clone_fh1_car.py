@@ -1,12 +1,15 @@
 """Cloning a stock FH1 car into a new car, with synthetic player files only."""
 import hashlib
 import importlib.util
+import io
+import json
 import sqlite3
 import struct
 import subprocess
 import tempfile
 import unittest
 import zipfile
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -528,6 +531,137 @@ class StringKeyTests(unittest.TestCase):
         # Turn 10's Pizza Hut has its own ModelShort key holding the Boss 302's short name.
         self.assertEqual(strings, [{"field": "DisplayName", "key": 6004, "text": "Challenger Rockstar"},
                                    {"field": "ModelShort", "key": 6005, "same_as": 23100}])
+
+
+class CloneSetup:
+    """Player files holding game_database()'s stock car 1557 (DOD_Car_12) on the
+    disc, a package car PKG_Car_13, and an ID table reserving 3001 for car 1557."""
+
+    def __init__(self, root: Path):
+        self.root, self.state, self.game = root, root / "state", root / "game"
+        db = game_database()
+        db.commit()
+        write_zip(self.state / "title-update-v4/media.zip", {"db/gamedb.slt": db.serialize()})
+        db.close()
+        package = self.state / TITLE / "00000002/PKG/Media/DLCZips"
+        write_zip(package / "2800_pri_65.zip", {"media/cars/PKG_Car_13/PKG_Car_13.carbin": b"package model"})
+        write_zip(package / "StringTables_pri_2950.zip", {"EN/Data_Car.str": string_table([(6002, "Taken")])})
+        dash = fbf_path(r"GAME:\MEDIA\CARS\DOD_CAR_12\DIGITALGAUGE\G.TGA")
+        write_zip(self.game / "media/cars/DOD_Car_12.zip", {
+            "DOD_Car_12.carbin": b"stock model", "stripped_dod_car_12.carbin": b"stripped", "nodamage.xds": b"paint",
+            "DigitalGauge/Dash_DOD_Car_12.fbf": dash, "DigitalGauge/G.XDS": b"gauge"})
+        write_zip(self.game / "media/audio/cars/CarModelTuning.zip", {"DOD_Car_12_CMT.xml": b"<cmt/>"})
+        write_zip(self.game / "media/audio/cars/Engines/EngineTuning.zip", {"DOD_Car_12_ET.xml": b"<et/>"})
+        write_zip(self.game / "media/StringTables/EN.zip",
+                  {"Data_Car.str": string_table([(23100, "Challenger '12"), (24056, "Challenger")])})
+        self.ids = root / "ids.json"
+        self.ids.write_text('{"schema_version": 1, "cars": [{"id": 3001, "stock_id": 1557, "car": "Rockstar"}]}')
+        self.output = root / "out" / "clone"
+
+    def args(self, **changes):
+        values = {"--state-root": self.state, "--game-root": self.game, "--stock-id": 1557, "--new-id": 3001,
+                  "--media-name": "DOD_Car_RSE_12", "--display-name": "Challenger Rockstar",
+                  "--output": self.output, "--ids": self.ids, "--extractor": self.root / "extractor.exe"}
+        values.update({f"--{key.replace('_', '-')}": value for key, value in changes.items()})
+        return [str(item) for pair in values.items() for item in pair]
+
+    def hashes(self):
+        return {p: hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(self.state.rglob("*"))
+                + sorted(self.game.rglob("*")) if p.is_file()}
+
+
+class CloneCarTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.setup = CloneSetup(Path(self.temporary.name))
+
+    def run_cli(self, **changes):
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            code = clone.main(self.setup.args(**changes))
+        return code, out.getvalue(), err.getvalue()
+
+    def test_the_cli_stages_the_car_and_prints_its_report(self):
+        code, out, err = self.run_cli()
+        self.assertEqual((code, err), (0, ""))
+        report = json.loads(out)
+        staged = sorted(str(p.relative_to(self.setup.output)).replace("\\", "/")
+                        for p in self.setup.output.rglob("*") if p.is_file())
+        self.assertEqual(staged, [
+            "media/audio/cars/CarModelTuning/DOD_Car_RSE_12_CMT.xml",
+            "media/audio/cars/Engines/EngineTuning/DOD_Car_RSE_12_ET.xml",
+            "media/cars/DOD_Car_RSE_12/DOD_Car_RSE_12.carbin",
+            "media/cars/DOD_Car_RSE_12/DigitalGauge/Dash_DOD_Car_RSE_12.fbf",
+            "media/cars/DOD_Car_RSE_12/DigitalGauge/G.XDS",
+            "media/cars/DOD_Car_RSE_12/nodamage.xds",
+            "media/cars/DOD_Car_RSE_12/stripped_dod_car_rse_12.carbin",
+            "media/db/patch/3001000_merge.slt"])
+        self.assertEqual(report["car"], {"id": 3001, "media_name": "DOD_Car_RSE_12",
+                                         "display_name": "Challenger Rockstar"})
+        self.assertEqual(report["stock"], {"id": 1557, "media_name": "DOD_Car_12",
+                                           "archive": str(self.setup.game / "media/cars/DOD_Car_12.zip")})
+        self.assertEqual(report["strings"], [{"field": "DisplayName", "key": 6003, "text": "Challenger Rockstar"},
+                                             {"field": "ModelShort", "key": 6004, "same_as": 23100}])
+        self.assertEqual(report["ids"]["body"], 3001000)
+        self.assertEqual(report["rows"], sum(report["tables"].values()))
+        self.assertEqual(len(report["files"]), 7)
+        self.assertTrue(report["sources_unchanged"])
+        self.assertEqual({source["path"] for source in report["sources"]}, {str(p) for p in self.setup.hashes()})
+        merge = sqlite3.connect(self.setup.output / "media/db/patch/3001000_merge.slt")
+        self.addCleanup(merge.close)
+        self.assertEqual(merge.execute("SELECT Id, DisplayName, ModelShort, MediaName FROM Data_Car").fetchall(),
+                         [(3001, "_&3444119411", "_&3444119412", "DOD_Car_RSE_12")])
+
+    def test_cloning_changes_no_source_file(self):
+        before = self.setup.hashes()
+        self.assertEqual(self.run_cli()[0], 0)
+        self.assertEqual(self.setup.hashes(), before)
+
+    def test_an_existing_output_is_refused(self):
+        self.setup.output.mkdir(parents=True)
+        code, _, err = self.run_cli()
+        self.assertEqual(code, 1)
+        self.assertIn("already exists", err)
+
+    def refused(self, message, **changes):
+        code, out, err = self.run_cli(**changes)
+        self.assertEqual((code, out), (1, ""))
+        self.assertRegex(err, message)
+        self.assertFalse(self.setup.output.exists())
+        self.assertEqual(list(self.setup.output.parent.glob("*")) if self.setup.output.parent.exists() else [], [])
+
+    def test_an_id_not_in_the_committed_table_is_refused(self):
+        self.refused("car ID 3002 is not reserved in .*ids.json", new_id=3002)
+
+    def test_a_reserved_id_for_another_stock_car_is_refused(self):
+        self.refused("car ID 3001 is reserved for a clone of car 1557, not 1600", stock_id=1600,
+                     media_name="OTH_Car_X_10")
+
+    def test_an_unknown_stock_car_is_refused(self):
+        self.setup.ids.write_text('{"schema_version": 1, "cars": [{"id": 3001, "stock_id": 1234, "car": "x"}]}')
+        self.refused("car 1234 is not in the game database", stock_id=1234)
+
+    def test_a_car_id_already_in_the_game_is_refused(self):
+        self.setup.ids.write_text('{"schema_version": 1, "cars": [{"id": 1600, "stock_id": 1557, "car": "x"}]}')
+        self.refused("car ID 1600 is already used", new_id=1600)
+
+    def test_a_media_name_used_by_a_car_or_its_files_is_refused(self):
+        self.refused("media name OTH_Car_10 is already used", media_name="OTH_Car_10")
+        self.refused("media name PKG_Car_13 is already used by .*2800_pri_65.zip", media_name="PKG_Car_13")
+
+    def test_a_media_name_that_is_not_a_plain_file_name_is_refused(self):
+        for name in ("../escape", "With Space", ""):
+            self.refused("media name must be", media_name=name)
+
+    def test_a_failure_part_way_leaves_no_output(self):
+        with patch.object(clone, "clone_files", side_effect=ValueError("unexpected dash file layout")):
+            self.refused("unexpected dash file layout")
+
+    def test_the_committed_table_reserves_3001_to_3007_for_the_seven_livery_cars(self):
+        table = clone.reserved_ids()
+        self.assertEqual({car: entry["stock_id"] for car, entry in table.items()},
+                         {3001: 1557, 3002: 1548, 3003: 1548, 3004: 1516, 3005: 1173, 3006: 1082, 3007: 1009})
 
 
 if __name__ == "__main__":

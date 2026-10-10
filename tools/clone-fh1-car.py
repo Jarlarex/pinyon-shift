@@ -6,11 +6,15 @@ the stock car's model files under a new media name, its audio tuning, and a
 merge database with its rows copied to a new car ID. Every source is read
 only; nothing in the disc, the title update or an installed package changes.
 """
+import argparse
 import hashlib
+import json
 import re
+import shutil
 import sqlite3
 import struct
 import subprocess
+import sys
 import tempfile
 import zipfile
 from dataclasses import dataclass
@@ -131,18 +135,42 @@ class Sources:
 
     # -- car files --------------------------------------------------------
 
-    def car_files(self, media_name: str) -> dict[str, bytes]:
-        """The stock car's model archive: the disc's media/cars/<name>.zip, or the
-        media/cars/<name>/ folder of an enabled package."""
-        disc = self.game_root / "media" / "cars" / f"{media_name}.zip"
-        if disc.is_file():
-            return self._members(disc)
+    def car_source(self, media_name: str) -> tuple[Path, str] | None:
+        """Where a car's model files are: the disc's media/cars/<name>.zip (any
+        case, as the Lancer's is mit_lancerevoxgsr_08.zip), or the
+        media/cars/<name>/ folder of an enabled package; None if neither."""
+        discs = {path.stem.lower(): path for path in (self.game_root / "media" / "cars").glob("*.zip")}
+        if media_name.lower() in discs:
+            return discs[media_name.lower()], ""
         prefix = f"media/cars/{media_name}/"
         for archive in self._package_archives():
             with zipfile.ZipFile(archive) as zipped:
                 if any(name.lower().startswith(prefix.lower()) for name in zipped.namelist()):
-                    return self._members(archive, prefix)
-        raise ValueError(f"car {media_name} is not on the disc or in an enabled package")
+                    return archive, prefix
+        return None
+
+    def car_files(self, media_name: str) -> dict[str, bytes]:
+        """The stock car's model archive members, keyed by their path in the car's folder."""
+        source = self.car_source(media_name)
+        if source is None:
+            raise ValueError(f"car {media_name} is not on the disc or in an enabled package")
+        return self._members(*source)
+
+    def inputs(self, media_name: str | None = None) -> list[Path]:
+        """Every file a clone of `media_name` reads: the title update (or the
+        disc's database), each enabled package archive, the disc's string tables
+        and audio tuning, and the car's own disc archive."""
+        update = self.state_root / "title-update-v4" / "media.zip"
+        files = [update] if update.is_file() else [self.game_root / "media/db/gamedb.slt"]
+        files += self._package_archives()
+        files += sorted((self.game_root / "media/StringTables").glob("*.zip"))
+        files += [self.game_root / name for name in ("media/audio/cars/CarModelTuning.zip",
+                                                     "media/audio/cars/Engines/EngineTuning.zip")
+                  if (self.game_root / name).is_file()]
+        source = self.car_source(media_name) if media_name else None
+        if source and source[0] not in files:
+            files.append(source[0])
+        return files
 
     def audio_files(self, media_name: str) -> dict[str, bytes]:
         """The car's CarModelTuning and EngineTuning XML, from the disc or a package."""
@@ -497,3 +525,122 @@ def clone_rows(db: sqlite3.Connection, stock_id: int, new_id: int, names: CarNam
                    if field in stock},
                 "AeroPhysicsID": sorted(written_values("AeroPhysicsID")),
                 "swap_engines": sorted(written_values("EngineID", "List_UpgradeEngine") - {new.engine})})
+
+
+# -- clone ------------------------------------------------------------------
+
+ROOT = Path(__file__).resolve().parents[1]
+ID_TABLE = ROOT / "config/livery-cars/ids.json"
+MEDIA_NAME = re.compile(r"[A-Za-z0-9_]+")
+
+
+def reserved_ids(table: Path = ID_TABLE) -> dict[int, dict]:
+    """The committed car ID table: new car ID -> its entry (stock car and name)."""
+    return {entry["id"]: entry for entry in json.loads(Path(table).read_text(encoding="utf-8"))["cars"]}
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as stream:
+        for block in iter(lambda: stream.read(1 << 20), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def clone_car(sources: Sources, stock_id: int, new_id: int, media_name: str, display_name: str, output: Path,
+              table: Path = ID_TABLE) -> dict:
+    """Stage a clone of a stock car in `output` in package layout (model tree,
+    audio tuning, media/db/patch/<new ID>000_merge.slt) and return its report.
+    Refuses an existing output, an ID the committed table does not reserve for
+    this stock car, a used car ID or media name, and an unknown stock car.
+    Every source file has the same SHA-256 afterwards; nothing is written
+    outside `output`, and a failed clone leaves no output."""
+    output = Path(output)
+    if not MEDIA_NAME.fullmatch(media_name or ""):
+        raise ValueError(f"media name must be letters, digits and underscores, not {media_name!r}")
+    if output.exists():
+        raise ValueError(f"{output} already exists; choose a new output folder")
+    reserved = reserved_ids(table).get(new_id)
+    if reserved is None:
+        raise ValueError(f"car ID {new_id} is not reserved in {table}")
+    if reserved["stock_id"] != stock_id:
+        raise ValueError(f"car ID {new_id} is reserved for a clone of car {reserved['stock_id']}, not {stock_id}")
+
+    before = {path: _sha256(path) for path in sources.inputs()}
+    db = sources.database()
+    try:
+        stock = db.execute("SELECT MediaName FROM Data_Car WHERE Id=?", (stock_id,)).fetchone()
+        if stock is None:
+            raise ValueError(f"car {stock_id} is not in the game database")
+        stock_media = stock[0]
+        used = sources.car_source(media_name)
+        if used:
+            raise ValueError(f"media name {media_name} is already used by {used[0]}")
+        archive = sources.car_source(stock_media)
+        before.update({path: _sha256(path) for path in sources.inputs(stock_media) if path not in before})
+        names, strings = clone_names(db, sources.data_car_keys(), stock_id, new_id, media_name, display_name)
+        rows = clone_rows(db, stock_id, new_id, names)
+    finally:
+        db.close()
+    staged, files = clone_files(sources.car_files(stock_media), sources.audio_files(stock_media), stock_media,
+                                media_name)
+    merge = f"media/db/patch/{new_id}000_merge.slt"
+    staged[merge] = rows.database
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(prefix=f".{output.name}-", dir=output.parent))
+    try:
+        for path, data in staged.items():
+            (staging / path).parent.mkdir(parents=True, exist_ok=True)
+            (staging / path).write_bytes(data)
+        after = {path: _sha256(path) for path in before}
+        changed = [str(path) for path in before if after[path] != before[path]]
+        if changed:
+            raise ValueError(f"source files changed while cloning: {', '.join(changed)}")
+        staging.rename(output)
+    except BaseException:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+    return {
+        "car": {"id": new_id, "media_name": media_name, "display_name": display_name},
+        "stock": {"id": stock_id, "media_name": stock_media, "archive": str(archive[0]) if archive else None},
+        "output": str(output),
+        "merge_database": merge,
+        "ids": rows.ids,
+        "shared": rows.shared,
+        "strings": strings,
+        "rows": sum(rows.tables.values()),
+        "tables": rows.tables,
+        "files": files,
+        "sources": [{"path": str(path), "sha256": digest} for path, digest in before.items()],
+        "sources_unchanged": True,
+    }
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser.add_argument("--state-root", type=Path, required=True, help="the installed preview state (.local/preview)")
+    parser.add_argument("--game-root", type=Path, required=True, help="the extracted disc (.local/game/eur-base)")
+    parser.add_argument("--stock-id", type=int, required=True)
+    parser.add_argument("--new-id", type=int, required=True, help="a car ID reserved in config/livery-cars/ids.json")
+    parser.add_argument("--media-name", required=True)
+    parser.add_argument("--display-name", required=True)
+    parser.add_argument("--output", type=Path, required=True, help="a new folder for the staged car")
+    parser.add_argument("--extractor", type=Path, help="archive extractor (default: the one the build made)")
+    parser.add_argument("--ids", type=Path, default=ID_TABLE, help=argparse.SUPPRESS)
+    args = parser.parse_args(argv)
+    extractor = args.extractor or _load_tool("manage-fh1-dlc").default_extractor()
+    try:
+        # CreateProcess needs the extractor as an absolute Windows path.
+        sources = Sources(args.state_root.absolute(), args.game_root.absolute(), extractor.resolve())
+        report = clone_car(sources, args.stock_id, args.new_id, args.media_name, args.display_name,
+                           args.output.absolute(), args.ids)
+    except (OSError, ValueError, zipfile.BadZipFile, sqlite3.Error) as error:
+        print(str(error), file=sys.stderr)
+        return 1
+    print(json.dumps(report, indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "description": "Car IDs reserved for the promotional livery cars (docs/LIVERY_CARS.md), above every Turn 10 car (1686) and the XE mod's (2276-2280). tools/clone-fh1-car.py refuses an ID not listed here, or a clone of another stock car.",
+  "cars": [
+    {"id": 3001, "stock_id": 1557, "car": "Challenger SRT8 392 Rockstar Energy"},
+    {"id": 3002, "stock_id": 1548, "car": "FR-S Meguiar's"},
+    {"id": 3003, "stock_id": 1548, "car": "FR-S Halo 4 Edition"},
+    {"id": 3004, "stock_id": 1516, "car": "CTR Yellowbird Dak's Garage"},
+    {"id": 3005, "stock_id": 1173, "car": "Murciélago LP 670-4 SV Darius Flynt"},
+    {"id": 3006, "stock_id": 1082, "car": "Fiesta Zetec S Season's Greetings"},
+    {"id": 3007, "stock_id": 1009, "car": "Lancer Evolution X GSR Eathole"}
+  ]
+}

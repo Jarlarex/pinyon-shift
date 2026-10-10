@@ -11,7 +11,7 @@ No game files, generated cars or livery art are committed; livery art lives in
 | Module | Tool | State |
 |---|---|---|
 | `xds-codec` | `tools/fh1_xds.py` | done (layout, read/write, decode, encode, in-game check) |
-| `car-clone` | `tools/clone-fh1-car.py` | sources, rows, names, files (CLI next) |
+| `car-clone` | `tools/clone-fh1-car.py` | done (sources, rows, names, files, CLI; car IDs in `config/livery-cars/ids.json`) |
 | `livery-paint`, `livery-package`, `promo-cars` | — | planned |
 
 ## Car textures (`tools/fh1_xds.py`)
@@ -48,6 +48,24 @@ python tools\fh1_xds.py encode <stock.xds> <in.png> <out.xds>   # header and siz
 | 2026-10-09 | In game, EU v4 build, `fh1-opening-sync` from a fresh profile in a scratch state: a private asset mod replaces all 8 `nodamage*` textures of the opening Viper (`VIP_Viper_13`, whose stripes are painted in its body texture) with `fh1_xds` re-encodes; the launcher rebuilds the archive (`zz-archive-patches`) and the game opens it 8 times (`mod.file.override`) | Opening drive reached; the car renders like the stock run: **1.4–1.6/255** mean difference over the car region (whole frame 7.0–7.6/255 from wall-time scenery motion); the same two pre-existing log errors as the stock run, nothing new |
 
 ## Cloning a car (`tools/clone-fh1-car.py`)
+
+```powershell
+python tools\clone-fh1-car.py --state-root .local\preview --game-root .local\game\eur-base `
+    --stock-id 1557 --new-id 3001 --media-name DOD_ChallengerSRT8392_RSE_12 `
+    --display-name "Challenger SRT8 392 Rockstar Energy" --output <new folder>
+```
+
+The output is the car in the layout a package mounts: `media/cars/<NewMedia>/`,
+`media/audio/cars/...` and `media/db/patch/<new ID>000_merge.slt`; the JSON
+report on stdout lists the stock car and its archive, the new IDs, the shared
+references, the two strings to write, rows per table, every file with its
+SHA-256 and whether it was renamed or rewritten, and the SHA-256 of every
+source read, checked unchanged before the output appears. `clone_car(...)`
+returns the same report for `livery-package`. The clone refuses an existing
+output, an ID that `config/livery-cars/ids.json` does not reserve for that
+stock car (3001–3007), a car ID or media name already used by any installed
+car or car folder, an unknown stock car, and a media name that is not a plain
+file name; a failed clone leaves no output.
 
 The clone reads only the player's files: the title update's `gamedb.slt` with
 the update's and every enabled package's merge applied on top (merge-number
@@ -106,3 +124,4 @@ audio tuning files are renamed into `media/audio/cars/CarModelTuning/` and
 | 2026-10-10 | `clone_names` against all 484 installed `Data_Car` tables (22 on the disc, the rest in 22 packages' `StringTables_pri_*` archives, every language): 516 keys, among them all 502 keys the 251 cars name | 3001–3007 get keys 6002–6015, all free; ModelShort copies stock keys 23100, 7612 (FR-S, twice), 50476, 55484, 6175, 7581 |
 | 2026-10-10 | `clone_files` on the Boss 302 under the Pizza Hut's media name, against Turn 10's Pizza Hut package | **58 files with exactly Turn 10's 58 names**; 46 byte-identical; the other 12 are files Turn 10 re-exported or repainted (the three main carbins and their stripped copies, `BuildNumber.txt`, the build report, `Dash_*.bgf`, `nodamage.xds`, `nodamage_LOD0.xds`); our rewritten `.fbf` differs from Turn 10's only in its own font and placeholder text. The Pizza Hut's `damage*.xds` are the Boss 302's unchanged |
 | 2026-10-10 | `clone_files` on the Challenger (1557) and FR-S (1548) | 67 and 58 files (63.4 and 33.0 MB), 28 renamed each, one `.fbf` rewritten each; gauge textures kept (`DOD_SRT8_09_GEARBASE.XDS`, `SCI_FRS_13_TXT_MPH.XDS`, …); the six livery stock cars' archives embed their folder only in the dash `.fbf` (the RUF has no dash) |
+| 2026-10-10 | CLI: 1557 → 3001 (`DOD_ChallengerSRT8392_RSE_12`) and 1548 → 3002 (`SCI_FRS_MEG_13`) into scratch folders | **21 s each**; 195 rows in 47 tables and 67 files (61 MB), 171 rows in 48 tables and 58 files (32 MB); keys 6002/6003 and 6004/6005; the **84 source files hashed before and after are unchanged**. Refused as expected: an existing output, ID 3008 (not reserved), 1548 → 3001 (reserved for 1557), media names `SCI_FRS_13` (a disc car) and `FOR_MustangBoss302_PZA_13` (a package car); nothing left behind |
