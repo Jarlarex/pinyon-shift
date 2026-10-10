@@ -8,6 +8,9 @@ from pathlib import Path
 SPEC = importlib.util.spec_from_file_location("paint_fh1_livery", Path(__file__).parents[1] / "paint-fh1-livery.py")
 paint = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(paint)
+XDS_SPEC = importlib.util.spec_from_file_location("fh1_xds", Path(__file__).parents[1] / "fh1_xds.py")
+xds = importlib.util.module_from_spec(XDS_SPEC)
+XDS_SPEC.loader.exec_module(xds)
 
 
 def close(test, a, b, places=9):
@@ -108,6 +111,168 @@ class PanelTableTests(unittest.TestCase):
         for message, data in cases.items():
             with self.subTest(message), self.assertRaisesRegex(ValueError, message):
                 self.load(data)
+
+
+# A 16 x 16 stock texture: paint area (alpha 0, white) everywhere except an opaque grey badge at
+# texels 0..3 x 0..3; "left" is the top-left quadrant laid upright, "right" the bottom-right one
+# laid upside down (front-top corner at its bottom-right).
+WHITE = (255, 255, 255)
+STOCK = b"".join(bytes((90, 90, 90, 255)) if x < 4 and y < 4 else bytes((*WHITE, 0))
+                 for y in range(16) for x in range(16))
+PANELS = {
+    "left": {"outline": [[0, 0], [0.5, 0], [0.5, 0.5], [0, 0.5]], "frame": [[0, 0], [0.5, 0], [0, 0.5]]},
+    "right": {"outline": [[0.5, 0.5], [1, 0.5], [1, 1], [0.5, 1]], "frame": [[1, 1], [0.5, 1], [1, 0.5]]},
+}
+
+
+class RecipeSetup:
+    def __init__(self, root: Path):
+        self.root = root
+        self.panels = root / "panels"
+        self.panels.mkdir()
+        (self.panels / "DOD_Car_12.json").write_text(json.dumps(table(PANELS)), encoding="utf-8")
+        self.ids = root / "ids.json"
+        self.ids.write_text(json.dumps({"schema_version": 1, "cars": [{"id": 3001, "stock_id": 1557, "car": "x"}]}))
+        self.art = root / "art"
+        self.art.mkdir()
+        # 2 x 1 art: red on the left, blue on the right.
+        (self.art / "flag.png").write_bytes(xds.encode_png(2, 1, bytes((255, 0, 0, 255, 0, 0, 255, 255))))
+
+    def recipe(self, layers, **car):
+        data = {"schema_version": 1,
+                "car": {"stock_id": 1557, "new_id": 3001, "stock_media": "DOD_Car_12",
+                        "media_name": "DOD_Car_RSE_12", "display_name": "Rockstar", "price": None, **car},
+                "paint": {"rgb": "111111"}, "layers": layers}
+        path = self.root / "test-livery.json"
+        path.write_text(json.dumps(data), encoding="utf-8")
+        return paint.load_recipe(path, art_dir=self.art, panel_tables=self.panels, id_table=self.ids)
+
+
+def pixel(rgba, x, y, width=16):
+    return tuple(rgba[4 * (y * width + x):4 * (y * width + x) + 4])
+
+
+def changed(before, after, width=16):
+    return {(i % width, i // width) for i in range(len(before) // 4) if before[4 * i:4 * i + 3] != after[4 * i:4 * i + 3]}
+
+
+class CompositeTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.setup = RecipeSetup(Path(self.temporary.name))
+
+    def compose(self, layers, size=16, stock=STOCK):
+        return paint.compose(stock, size, size, self.setup.recipe(layers))
+
+    def test_a_fill_over_all_colours_the_paint_area_and_keeps_alpha(self):
+        out = self.compose([{"fill": "112233", "panels": "all"}])
+        self.assertEqual(pixel(out, 10, 10), (0x11, 0x22, 0x33, 0))
+        self.assertEqual(pixel(out, 1, 1), (90, 90, 90, 255))           # the badge is not paint
+        self.assertEqual(out[3::4], STOCK[3::4])
+
+    def test_a_fill_on_a_panel_stays_inside_its_outline_and_paint_area(self):
+        out = self.compose([{"fill": "FF0000", "panels": ["left"]}])
+        self.assertEqual(changed(STOCK, out), {(x, y) for x in range(8) for y in range(8)} -
+                         {(x, y) for x in range(4) for y in range(4)})
+
+    def test_opaque_also_recolours_stock_opaque_texels_inside_the_outline(self):
+        out = self.compose([{"fill": "FF0000", "panels": ["left"], "opaque": True}])
+        self.assertEqual(changed(STOCK, out), {(x, y) for x in range(8) for y in range(8)})
+        self.assertEqual(pixel(out, 1, 1), (255, 0, 0, 255))
+
+    def test_a_band_follows_the_panel_frame(self):
+        # On the upside-down "right" panel, u 0..0.5 and v 0..0.5 is the quadrant at its bottom right.
+        out = self.compose([{"band": "00FF00", "panel": "right", "u": [0, 0.5], "v": [0, 0.5]}])
+        self.assertEqual(changed(STOCK, out), {(x, y) for x in range(12, 16) for y in range(12, 16)})
+
+    def test_opacity_blends_over_what_is_below(self):
+        out = self.compose([{"fill": "000000", "panels": ["right"], "opacity": 0.5}])
+        self.assertEqual(pixel(out, 12, 12), (128, 128, 128, 0))
+
+    def test_layers_apply_in_order(self):
+        out = self.compose([{"fill": "FF0000", "panels": "all"}, {"fill": "0000FF", "panels": ["right"]}])
+        self.assertEqual(pixel(out, 5, 5)[:3], (255, 0, 0))
+        self.assertEqual(pixel(out, 12, 12)[:3], (0, 0, 255))
+
+    def image(self, **placement):
+        layer = {"image": "flag.png", "panel": "left", "at": [0.5, 0.5], "width": 1.0, **placement}
+        return self.compose([layer], size=32, stock=bytes((*WHITE, 0)) * (32 * 32))
+
+    def test_an_image_keeps_its_aspect_and_reads_along_the_panel(self):
+        out = self.image()
+        # The 16 x 16 panel holds a 16 x 8 image centred on it: red on its front half, blue on its rear.
+        self.assertEqual(pixel(out, 2, 8, 32)[:3], (255, 0, 0))
+        self.assertEqual(pixel(out, 13, 8, 32)[:3], (0, 0, 255))
+        self.assertEqual(pixel(out, 8, 2, 32)[:3], WHITE)                 # above the image
+        self.assertEqual(changed(bytes((*WHITE, 0)) * 1024, out, 32), {(x, y) for x in range(16) for y in range(4, 12)})
+
+    def test_mirror_and_rotation_turn_the_image(self):
+        mirrored = self.image(mirror=True)
+        self.assertEqual((pixel(mirrored, 2, 8, 32)[:3], pixel(mirrored, 13, 8, 32)[:3]), ((0, 0, 255), (255, 0, 0)))
+        turned = self.image(rotate=180)
+        self.assertEqual((pixel(turned, 2, 8, 32)[:3], pixel(turned, 13, 8, 32)[:3]), ((0, 0, 255), (255, 0, 0)))
+        quarter = self.image(rotate=90, width=0.5)
+        # Turned a quarter clockwise in panel coordinates (u right, v down): red on top, blue below.
+        self.assertEqual((pixel(quarter, 8, 5, 32)[:3], pixel(quarter, 8, 10, 32)[:3]), ((255, 0, 0), (0, 0, 255)))
+
+    def test_an_image_on_an_upside_down_panel_turns_with_it(self):
+        layer = {"image": "flag.png", "panel": "right", "at": [0.5, 0.5], "width": 1.0}
+        out = paint.compose(bytes((*WHITE, 0)) * 1024, 32, 32, self.setup.recipe([layer]))
+        # u runs right to left on this panel, so the front (red) half is on the texture's right.
+        self.assertEqual((pixel(out, 29, 24, 32)[:3], pixel(out, 18, 24, 32)[:3]), ((255, 0, 0), (0, 0, 255)))
+
+    def test_transparent_art_changes_nothing(self):
+        (self.setup.art / "clear.png").write_bytes(xds.encode_png(2, 2, bytes(16)))
+        out = self.compose([{"image": "clear.png", "panel": "left", "at": [0.5, 0.5], "width": 1.0}])
+        self.assertEqual(out, STOCK)
+
+    def test_the_same_recipe_paints_the_same_bytes(self):
+        layers = [{"fill": "203040", "panels": "all"}, {"image": "flag.png", "panel": "left", "at": [0.4, 0.6],
+                                                         "width": 0.7, "rotate": 33, "opacity": 0.8}]
+        self.assertEqual(self.compose(layers), self.compose(layers))
+
+
+class RecipeTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.setup = RecipeSetup(Path(self.temporary.name))
+
+    def test_a_recipe_loads_with_its_car_panels_and_art(self):
+        recipe = self.setup.recipe([{"image": "flag.png", "panel": "left", "at": [0.5, 0.5], "width": 0.5}])
+        self.assertEqual(recipe.name, "test-livery")
+        self.assertEqual(recipe.car["media_name"], "DOD_Car_RSE_12")
+        self.assertEqual(sorted(recipe.panels), ["left", "right"])
+        self.assertEqual(recipe.art["flag.png"][:2], (2, 1))
+
+    def test_bad_recipes_are_refused_with_the_reason(self):
+        rgb = self.setup.art / "rgb.png"
+        data = bytearray(xds.encode_png(1, 1, bytes(4)))
+        data[25] = 2                                       # IHDR colour type 2: RGB without alpha
+        rgb.write_bytes(bytes(data))
+        cases = {
+            "not reserved": ([], {"new_id": 3002}),
+            "reserved for a clone of car 1557": ([], {"stock_id": 1600}),
+            "no panel table": ([], {"stock_media": "NO_Car_12"}),
+            "unknown panel": ([{"fill": "FF0000", "panels": ["roof"]}], {}),
+            "colour": ([{"fill": "red", "panels": "all"}], {}),
+            "one of fill, band or image": ([{"fill": "FF0000", "band": "FF0000", "panel": "left"}], {}),
+            "not found": ([{"image": "missing.png", "panel": "left", "at": [0.5, 0.5], "width": 0.5}], {}),
+            "plain file name": ([{"image": "../flag.png", "panel": "left", "at": [0.5, 0.5], "width": 0.5}], {}),
+            "8-bit RGBA": ([{"image": "rgb.png", "panel": "left", "at": [0.5, 0.5], "width": 0.5}], {}),
+            "opacity": ([{"fill": "FF0000", "panels": "all", "opacity": 2}], {}),
+            "whole paint area": ([{"fill": "FF0000", "panels": "all", "opaque": True}], {}),
+            "width": ([{"image": "flag.png", "panel": "left", "at": [0.5, 0.5], "width": 0}], {}),
+        }
+        for message, (layers, car) in cases.items():
+            with self.subTest(message), self.assertRaisesRegex(ValueError, message):
+                self.setup.recipe(layers, **car)
+
+    def test_an_absolute_art_path_is_refused(self):
+        layer = {"image": str(self.setup.art / "flag.png"), "panel": "left", "at": [0.5, 0.5], "width": 0.5}
+        with self.assertRaisesRegex(ValueError, "plain file name"):
+            self.setup.recipe([layer])
 
 
 if __name__ == "__main__":
