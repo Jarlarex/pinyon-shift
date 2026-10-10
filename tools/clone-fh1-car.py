@@ -170,6 +170,62 @@ class Sources:
         return found
 
 
+# -- names ------------------------------------------------------------------
+
+DATA_CAR_STRINGS = 0xCD49   # the Data_Car string table's ID; cars name it as `_&<(table << 16) | key>`
+STRING_SENTINEL = 0xFFFF
+
+
+def string_reference(key: int) -> str:
+    return f"_&{(DATA_CAR_STRINGS << 16) | key}"
+
+
+def string_key(reference: str) -> int | None:
+    """The Data_Car string key a `_&<id>` reference names, or None for text or another table."""
+    match = re.fullmatch(r"_&(\d+)", reference or "")
+    if not match or int(match.group(1)) >> 16 != DATA_CAR_STRINGS:
+        return None
+    return int(match.group(1)) & 0xFFFF
+
+
+def referenced_string_keys(db: sqlite3.Connection) -> set[int]:
+    """Data_Car string keys any car's DisplayName or ModelShort names."""
+    keys = {string_key(value) for row in db.execute("SELECT DisplayName, ModelShort FROM Data_Car") for value in row}
+    return keys - {None}
+
+
+def allocate_string_keys(used: set[int], new_id: int, count: int = 2) -> list[int]:
+    """`count` keys no installed table or car uses, searched from 2 x the car
+    ID up: the livery cars 3001-3007 get 6002-6015 (free in every installed
+    table), so cars built before each other's packages are installed never
+    share a key. Key 0 and the table's 0xFFFF sentinel are never used."""
+    keys, key = [], (2 * new_id) & 0xFFFF
+    for _ in range(0x10000):
+        if key not in used and key not in (0, STRING_SENTINEL):
+            keys.append(key)
+            if len(keys) == count:
+                return keys
+        key = (key + 1) & 0xFFFF
+    raise ValueError("there are no unused Data_Car string keys left")
+
+
+def clone_names(db: sqlite3.Connection, table_keys: set[int], stock_id: int, new_id: int, media: str,
+                display: str) -> tuple["CarNames", list[dict]]:
+    """The new car's names: a new DisplayName string, and a new ModelShort key
+    holding the stock car's short name (the Pizza Hut's ModelShort key 6879
+    holds the Boss 302's "Ford Mustang '13"). `table_keys` are the keys of every
+    installed Data_Car table; returns the names and the strings to write."""
+    stock_short = db.execute("SELECT ModelShort FROM Data_Car WHERE Id=?", (stock_id,)).fetchone()
+    if stock_short is None:
+        raise ValueError(f"car {stock_id} is not in the game database")
+    display_key, short_key = allocate_string_keys(table_keys | referenced_string_keys(db), new_id)
+    stock_key = string_key(stock_short[0])
+    short = {"same_as": stock_key} if stock_key is not None else {"text": stock_short[0]}
+    return (CarNames(media, string_reference(display_key), string_reference(short_key)),
+            [{"field": "DisplayName", "key": display_key, "text": display},
+             {"field": "ModelShort", "key": short_key, **short}])
+
+
 # -- rows -------------------------------------------------------------------
 
 # Car-defining tables keyed by the car ID, beside every List_Upgrade* table with

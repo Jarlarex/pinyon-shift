@@ -416,5 +416,46 @@ class RowCloneTests(unittest.TestCase):
             clone.clone_rows(self.db, 1557, 3001, NAMES)
 
 
+class StringKeyTests(unittest.TestCase):
+    def test_a_reference_names_the_data_car_table_and_the_key(self):
+        # The Pizza Hut Mustang's name: table 0xCD49, key 7451.
+        self.assertEqual(clone.string_reference(7451), "_&3444120859")
+        self.assertEqual(clone.string_key("_&3444120859"), 7451)
+
+    def test_a_reference_into_another_table_is_not_a_data_car_key(self):
+        self.assertIsNone(clone.string_key("_&857938260"))   # MakeName, a different table
+        self.assertIsNone(clone.string_key("Plain text"))
+
+    def test_keys_start_at_twice_the_car_id_so_cars_built_together_never_share_one(self):
+        self.assertEqual(clone.allocate_string_keys(set(), 3001), [6002, 6003])
+        pairs = [clone.allocate_string_keys(set(), car) for car in range(3001, 3008)]
+        self.assertEqual(len({key for pair in pairs for key in pair}), 14)
+
+    def test_used_keys_are_skipped(self):
+        self.assertEqual(clone.allocate_string_keys({6002, 6004}, 3001), [6003, 6005])
+
+    def test_the_search_wraps_past_the_sentinel_and_key_zero(self):
+        self.assertEqual(clone.allocate_string_keys({65534}, 32767), [1, 2])
+
+    def test_a_full_table_is_refused(self):
+        with self.assertRaisesRegex(ValueError, "no unused Data_Car string keys"):
+            clone.allocate_string_keys(set(range(0x10000)) - {7}, 3001)
+
+    def test_keys_referenced_by_any_car_are_used_even_if_no_table_has_them(self):
+        db = game_database()
+        self.addCleanup(db.close)
+        self.assertEqual(clone.referenced_string_keys(db), {24056, 23100, 23592, 23593})
+
+    def test_names_take_a_new_display_name_and_a_copy_of_the_stock_short_name(self):
+        db = game_database()
+        self.addCleanup(db.close)
+        db.execute("UPDATE Data_Car SET DisplayName='_&3444119410' WHERE Id=1600")   # key 6002 taken by a car
+        names, strings = clone.clone_names(db, {6003}, 1557, 3001, "DOD_Car_RSE_12", "Challenger Rockstar")
+        self.assertEqual(names, clone.CarNames("DOD_Car_RSE_12", "_&3444119412", "_&3444119413"))
+        # Turn 10's Pizza Hut has its own ModelShort key holding the Boss 302's short name.
+        self.assertEqual(strings, [{"field": "DisplayName", "key": 6004, "text": "Challenger Rockstar"},
+                                   {"field": "ModelShort", "key": 6005, "same_as": 23100}])
+
+
 if __name__ == "__main__":
     unittest.main()
