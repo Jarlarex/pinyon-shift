@@ -171,6 +171,250 @@ class SourcesTests(unittest.TestCase):
         sources.audio_files("DLC_Car_13")
         self.assertEqual(self.files.hashes(), before)
 
+    def test_the_merged_database_is_committed_so_it_can_be_serialised(self):
+        con = self.files.sources().database()
+        self.addCleanup(con.close)
+        self.assertFalse(con.in_transaction)
+        copy = sqlite3.connect(":memory:")
+        copy.deserialize(con.serialize())
+        self.assertEqual(len(copy.execute("SELECT Id FROM Data_Car").fetchall()), 3)
+
+
+def game_database():
+    """A stock car 1557 (engine 1024, body 1557000, drivetrain 963) with an engine
+    swap to car 1600's engine 1050, plus gameplay rows that mention it."""
+    con = sqlite3.connect(":memory:")
+    con.executescript("""
+        CREATE TABLE Data_Car (Id INTEGER, DisplayName TEXT, ModelShort TEXT, MediaName TEXT, FamilyModelID INTEGER,
+            PowertrainID INTEGER, Thumbnail TEXT, StockWheelID INTEGER, ModelId INTEGER, HasRaceLivery INTEGER,
+            BaseCost INTEGER, [Time:0-60-sec] REAL);
+        INSERT INTO Data_Car VALUES
+            (1557, '_&3444137464', '_&3444136508', 'DOD_Car_12', 30, 1,
+             'game:\\Media\\UI\\Textures\\Thumbnails\\Thumbnail_1557.xds', 11145, 1557, 0, 45000, 4.5),
+            (1600, '_&3444137000', '_&3444137001', 'OTH_Car_10', 12, 2,
+             'game:\\Media\\UI\\Textures\\Thumbnails\\Thumbnail_1600.xds', 11000, 1600, 0, 9000, 8.0);
+        CREATE TABLE CameraOverrides (CarId INTEGER PRIMARY KEY, CamHeight REAL);
+        INSERT INTO CameraOverrides VALUES (1557, 0.1), (1600, 0.2);
+        CREATE TABLE CarExceptions (CarID INTEGER, NoMirrors INTEGER);
+        INSERT INTO CarExceptions VALUES (1557, 0);
+        CREATE TABLE CarPartPositions (ID INTEGER, Ordinal INTEGER, PartId INTEGER, PartPosX REAL);
+        INSERT INTO CarPartPositions VALUES (1557000, 1557, 0, 1.5), (1557001, 1557, 1, 2.5), (1600000, 1600, 0, 9.0);
+        CREATE TABLE Combo_Colors (ID INTEGER, Ordinal INTEGER, Sequence INTEGER, RGB INTEGER, BaseTexture TEXT);
+        INSERT INTO Combo_Colors VALUES (1557001, 1557, 1, 111, 'nodamageBlack.tga'),
+            (1557002, 1557, 2, 222, 'nodamageRed.tga');
+        CREATE TABLE Combo_Colors_Exceptions (ID INTEGER, Ordinal INTEGER, Sequence INTEGER, ColorStripe INTEGER);
+        INSERT INTO Combo_Colors_Exceptions VALUES (827, 1557, 1, 5), (828, 1557, 2, 6), (829, 1600, 1, 7);
+        CREATE TABLE List_AntiSwayPhysics (AntiSwayPhysicsID INTEGER, Ordinal INTEGER, Stiffness REAL);
+        INSERT INTO List_AntiSwayPhysics VALUES (1557001, 1557, 1.0), (1557101, 1557, 2.0);
+        CREATE TABLE List_SpringDamperPhysics (SpringDamperPhysicsID INTEGER, Ordinal INTEGER, RideHeight REAL);
+        INSERT INTO List_SpringDamperPhysics VALUES (1557001, 1557, 0.1), (1557101, 1557, 0.2);
+        CREATE TABLE List_UpgradeAntiSwayFront (Id INTEGER, Ordinal INTEGER, Level INTEGER, AntiSwayPhysicsID INTEGER);
+        INSERT INTO List_UpgradeAntiSwayFront VALUES (1557000, 1557, 1, 1557001);
+        CREATE TABLE List_UpgradeSpringDamper (Id INTEGER, Ordinal INTEGER, Level INTEGER,
+            FrontSpringDamperPhysicsID INTEGER, RearSpringDamperPhysicsID INTEGER);
+        INSERT INTO List_UpgradeSpringDamper VALUES (1557000, 1557, 1, 1557001, 1557101);
+        CREATE TABLE List_UpgradeRearWing (Id INTEGER, Ordinal INTEGER, Level INTEGER, AeroPhysicsID INTEGER);
+        INSERT INTO List_UpgradeRearWing VALUES (1557000, 1557, 0, 77);
+        CREATE TABLE List_UpgradeEngine (Id INTEGER, Ordinal INTEGER, Level INTEGER, EngineID INTEGER, IsStock INTEGER);
+        INSERT INTO List_UpgradeEngine VALUES (1557000, 1557, 0, 1024, 1), (1557001, 1557, 1, 1050, 0),
+            (1600000, 1600, 0, 1050, 1);
+        CREATE TABLE Data_Engine (EngineID INTEGER, MediaName TEXT, [EngineMass-kg] REAL);
+        INSERT INTO Data_Engine VALUES (1024, 'DOD_Car_12', 200.0), (1050, 'OTH_Car_10', 150.0);
+        CREATE TABLE List_UpgradeEngineCamshaft (Id INTEGER, EngineID INTEGER, Level INTEGER,
+            TorqueCurveFullThrottleID INTEGER);
+        INSERT INTO List_UpgradeEngineCamshaft VALUES (1024000, 1024, 1, 1024000), (1024002, 1024, 2, 1024002),
+            (1050000, 1050, 1, 1050000);
+        CREATE TABLE List_UpgradeEngineValves (Id INTEGER, EngineID INTEGER, Level INTEGER, TorqueScale REAL);
+        INSERT INTO List_UpgradeEngineValves VALUES (1024000, 1024, 1, 1.1);
+        CREATE TABLE List_TorqueCurve (TorqueCurveID INTEGER, TorqueScale REAL, v0 REAL);
+        INSERT INTO List_TorqueCurve VALUES (1024000, 1.0, 0.5), (1024002, 1.2, 0.6), (1050000, 0.9, 0.4);
+        CREATE TABLE List_UpgradeCarBody (Id INTEGER, Ordinal INTEGER, Level INTEGER, CarBodyID INTEGER);
+        INSERT INTO List_UpgradeCarBody VALUES (1557000, 1557, 0, 1557000), (1600000, 1600, 0, 1600000);
+        CREATE TABLE Data_CarBody (Id INTEGER, ModelWheelbase REAL);
+        INSERT INTO Data_CarBody VALUES (1557000, 2.9), (1600000, 2.5);
+        CREATE TABLE List_UpgradeCarBodyHood (Id INTEGER, CarBodyID INTEGER, Level INTEGER, AeroPhysicsID INTEGER);
+        INSERT INTO List_UpgradeCarBodyHood VALUES (1557000, 1557000, 0, 78), (1557002, 1557000, 1, 79);
+        CREATE TABLE List_UpgradeCarBodyWeight (Id INTEGER, CarbodyId INTEGER, Level INTEGER, Mass REAL);
+        INSERT INTO List_UpgradeCarBodyWeight VALUES (1557000, 1557000, 0, 1800.0);
+        CREATE TABLE List_UpgradeDrivetrain (Id INTEGER, Ordinal INTEGER, DrivetrainID INTEGER, PowertrainId INTEGER,
+            Level INTEGER);
+        INSERT INTO List_UpgradeDrivetrain VALUES (1557000, 1557, 963, 1, 0), (1600000, 1600, 970, 2, 0);
+        CREATE TABLE Data_Drivetrain (DrivetrainID INTEGER, DrivetypeID INTEGER);
+        INSERT INTO Data_Drivetrain VALUES (963, 2), (970, 1);
+        CREATE TABLE List_UpgradeDrivetrainClutch (Id INTEGER, DrivetrainID INTEGER, Level INTEGER);
+        INSERT INTO List_UpgradeDrivetrainClutch VALUES (963000, 963, 1), (963002, 963, 2);
+        CREATE TABLE List_UpgradeDrivetrainDriveline (Id INTEGER, DrivetrainId INTEGER, Level INTEGER);
+        INSERT INTO List_UpgradeDrivetrainDriveline VALUES (963000, 963, 1);
+        CREATE TABLE List_Wheels (ID INTEGER, MediaName TEXT);
+        INSERT INTO List_Wheels VALUES (11145, 'DOD_Car_12');
+        CREATE TABLE List_FamilyModel (Id INTEGER, DisplayName TEXT);
+        INSERT INTO List_FamilyModel VALUES (30, 'Challenger');
+        CREATE TABLE CarChallenges (CarId INTEGER, Title TEXT);
+        INSERT INTO CarChallenges VALUES (1557, 'drift');
+        CREATE TABLE CarChallengeTitles (CarId INTEGER, Title TEXT);
+        INSERT INTO CarChallengeTitles VALUES (1557, 'title');
+        CREATE TABLE EventParticipants (ID INTEGER, EventID INTEGER, Ordinal INTEGER);
+        INSERT INTO EventParticipants VALUES (1557, 5, 1);
+        CREATE TABLE EventRecommendedCars (EventID INTEGER, CarID INTEGER);
+        INSERT INTO EventRecommendedCars VALUES (5, 1557);
+        CREATE TABLE Rewards_EventPrizes (Id INTEGER, EventId INTEGER, RewardCarId INTEGER);
+        INSERT INTO Rewards_EventPrizes VALUES (1, 5, 1557);
+    """)
+    return con
+
+
+NAMES = clone.CarNames("DOD_Car_RSE_12", "_&3444120000", "_&3444120001")
+
+
+class RowCloneTests(unittest.TestCase):
+    def setUp(self):
+        self.db = game_database()
+        self.addCleanup(self.db.close)
+
+    def clone(self, stock_id=1557, new_id=3001, names=NAMES):
+        result = clone.clone_rows(self.db, stock_id, new_id, names)
+        merge = sqlite3.connect(":memory:")
+        merge.deserialize(result.database)
+        self.addCleanup(merge.close)
+        return result, merge
+
+    @staticmethod
+    def rows(con, sql):
+        return con.execute(sql).fetchall()
+
+    def test_data_car_changes_only_the_identity_names_thumbnail_and_race_livery(self):
+        _, merge = self.clone()
+        self.assertEqual(self.rows(merge, "SELECT * FROM Data_Car"), [
+            (3001, "_&3444120000", "_&3444120001", "DOD_Car_RSE_12", 30, 1,
+             "game:\\Media\\UI\\Textures\\Thumbnails\\Thumbnail_3001.xds", 11145, 3001, 1, 45000, 4.5)])
+
+    def test_per_car_rows_are_copied_under_the_new_car_id(self):
+        _, merge = self.clone()
+        self.assertEqual(self.rows(merge, "SELECT * FROM CameraOverrides"), [(3001, 0.1)])
+        self.assertEqual(self.rows(merge, "SELECT * FROM CarExceptions"), [(3001, 0)])
+        self.assertEqual(self.rows(merge, "SELECT * FROM CarPartPositions"),
+                         [(3001000, 3001, 0, 1.5), (3001001, 3001, 1, 2.5)])
+        self.assertEqual(self.rows(merge, "SELECT * FROM Combo_Colors"),
+                         [(3001001, 3001, 1, 111, "nodamageBlack.tga"), (3001002, 3001, 2, 222, "nodamageRed.tga")])
+        self.assertEqual(self.rows(merge, "SELECT * FROM List_AntiSwayPhysics"),
+                         [(3001001, 3001, 1.0), (3001101, 3001, 2.0)])
+        self.assertEqual(self.rows(merge, "SELECT * FROM List_SpringDamperPhysics"),
+                         [(3001001, 3001, 0.1), (3001101, 3001, 0.2)])
+        self.assertEqual(self.rows(merge, "SELECT * FROM List_UpgradeAntiSwayFront"), [(3001000, 3001, 1, 3001001)])
+        self.assertEqual(self.rows(merge, "SELECT * FROM List_UpgradeSpringDamper"),
+                         [(3001000, 3001, 1, 3001001, 3001101)])
+
+    def test_rows_repeated_by_two_packages_carrying_the_same_car_are_copied_once(self):
+        # The 1100 and 1200 car packs both ship the Boss 302; keyless tables then hold every row twice.
+        self.db.execute("INSERT INTO CarPartPositions VALUES (1557000, 1557, 0, 1.5)")
+        _, merge = self.clone()
+        self.assertEqual(self.rows(merge, "SELECT * FROM CarPartPositions"),
+                         [(3001000, 3001, 0, 1.5), (3001001, 3001, 1, 2.5)])
+
+    def test_colour_exceptions_numbered_one_after_another_get_ids_under_the_new_car(self):
+        # Turn 10 numbers these rows 1, 2, 3, ...; car x 1000 + n cannot collide with them or another clone.
+        _, merge = self.clone()
+        self.assertEqual(self.rows(merge, "SELECT * FROM Combo_Colors_Exceptions"),
+                         [(3001001, 3001, 1, 5), (3001002, 3001, 2, 6)])
+
+    def test_the_stock_engine_is_rekeyed_with_its_parts_torque_curves_and_media_name(self):
+        result, merge = self.clone()
+        self.assertEqual(self.rows(merge, "SELECT * FROM Data_Engine"), [(3001, "DOD_Car_RSE_12", 200.0)])
+        self.assertEqual(self.rows(merge, "SELECT * FROM List_UpgradeEngineCamshaft"),
+                         [(3001000, 3001, 1, 3001000), (3001002, 3001, 2, 3001002)])
+        self.assertEqual(self.rows(merge, "SELECT * FROM List_UpgradeEngineValves"), [(3001000, 3001, 1, 1.1)])
+        self.assertEqual(self.rows(merge, "SELECT * FROM List_TorqueCurve"), [(3001000, 1.0, 0.5), (3001002, 1.2, 0.6)])
+        self.assertEqual(result.ids["engine"], 3001)
+        self.assertEqual(result.ids["torque_curves"], [3001000, 3001002])
+
+    def test_a_swap_engine_stays_shared_with_the_car_that_owns_it(self):
+        result, merge = self.clone()
+        self.assertEqual(self.rows(merge, "SELECT * FROM List_UpgradeEngine"),
+                         [(3001000, 3001, 0, 3001, 1), (3001001, 3001, 1, 1050, 0)])
+        self.assertEqual(result.shared["swap_engines"], [1050])
+
+    def test_the_car_body_is_car_id_times_1000_whatever_the_key_is_spelt(self):
+        result, merge = self.clone()
+        self.assertEqual(self.rows(merge, "SELECT * FROM List_UpgradeCarBody"), [(3001000, 3001, 0, 3001000)])
+        self.assertEqual(self.rows(merge, "SELECT * FROM Data_CarBody"), [(3001000, 2.9)])
+        self.assertEqual(self.rows(merge, "SELECT * FROM List_UpgradeCarBodyHood"),
+                         [(3001000, 3001000, 0, 78), (3001002, 3001000, 1, 79)])
+        self.assertEqual(self.rows(merge, "SELECT * FROM List_UpgradeCarBodyWeight"), [(3001000, 3001000, 0, 1800.0)])
+        self.assertEqual(result.ids["body"], 3001000)
+
+    def test_the_drivetrain_takes_the_new_car_id_and_keeps_its_powertrain(self):
+        result, merge = self.clone()
+        self.assertEqual(self.rows(merge, "SELECT * FROM List_UpgradeDrivetrain"), [(3001000, 3001, 3001, 1, 0)])
+        self.assertEqual(self.rows(merge, "SELECT * FROM Data_Drivetrain"), [(3001, 2)])
+        self.assertEqual(self.rows(merge, "SELECT * FROM List_UpgradeDrivetrainClutch"),
+                         [(3001000, 3001, 1), (3001002, 3001, 2)])
+        self.assertEqual(self.rows(merge, "SELECT * FROM List_UpgradeDrivetrainDriveline"), [(3001000, 3001, 1)])
+        self.assertEqual(result.ids["drivetrain"], 3001)
+
+    def test_wheels_aero_family_and_powertrain_are_shared_not_copied(self):
+        result, merge = self.clone()
+        tables = {name for (name,) in merge.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        self.assertNotIn("List_Wheels", tables)
+        self.assertNotIn("List_FamilyModel", tables)
+        self.assertEqual(self.rows(merge, "SELECT AeroPhysicsID FROM List_UpgradeRearWing"), [(77,)])
+        self.assertEqual(result.shared["StockWheelID"], 11145)
+        self.assertEqual(result.shared["FamilyModelID"], 30)
+        self.assertEqual(result.shared["PowertrainID"], 1)
+        self.assertEqual(result.shared["AeroPhysicsID"], [77, 78, 79])
+
+    def test_gameplay_rows_that_mention_the_car_stay_with_the_stock_car(self):
+        _, merge = self.clone()
+        tables = {name for (name,) in merge.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        for gameplay in ("CarChallenges", "CarChallengeTitles", "EventParticipants", "EventRecommendedCars",
+                         "Rewards_EventPrizes"):
+            self.assertNotIn(gameplay, tables)
+
+    def test_the_merge_uses_the_source_schema_and_holds_only_new_rows(self):
+        result, merge = self.clone()
+        source = dict(self.db.execute("SELECT name, sql FROM sqlite_master WHERE type='table'"))
+        written = dict(merge.execute("SELECT name, sql FROM sqlite_master WHERE type='table'"))
+        self.assertEqual(written, {name: source[name] for name in written})
+        self.assertEqual(result.tables, {name: merge.execute(f"SELECT COUNT(*) FROM [{name}]").fetchone()[0]
+                                         for name in written})
+        self.assertEqual(sum(result.tables.values()), 34)
+
+    def test_the_source_database_is_not_changed(self):
+        before = self.db.serialize()
+        self.clone()
+        self.assertEqual(self.db.serialize(), before)
+
+    def test_an_unknown_stock_car_is_refused(self):
+        with self.assertRaisesRegex(ValueError, "car 1234 is not in the game database"):
+            clone.clone_rows(self.db, 1234, 3001, NAMES)
+
+    def test_a_car_id_already_in_use_is_refused(self):
+        for used in (1557, 1600):
+            with self.assertRaisesRegex(ValueError, f"car ID {used} is already used"):
+                clone.clone_rows(self.db, 1557, used, NAMES)
+
+    def test_a_media_name_already_in_use_is_refused(self):
+        with self.assertRaisesRegex(ValueError, "media name oth_car_10 is already used"):
+            clone.clone_rows(self.db, 1557, 3001, NAMES._replace(media="oth_car_10"))
+
+    def test_a_component_id_already_in_use_is_refused(self):
+        for statement, what in (("INSERT INTO Data_Engine VALUES (3001, 'X', 1.0)", "Data_Engine"),
+                                ("INSERT INTO List_TorqueCurve VALUES (3001002, 1.0, 1.0)", "List_TorqueCurve"),
+                                ("INSERT INTO Data_CarBody VALUES (3001000, 1.0)", "Data_CarBody"),
+                                ("INSERT INTO List_UpgradeDrivetrainClutch VALUES (3001000, 3001, 1)",
+                                 "List_UpgradeDrivetrainClutch"),
+                                ("INSERT INTO CameraOverrides VALUES (3001, 1.0)", "CameraOverrides")):
+            with self.subTest(what):
+                db = game_database()
+                self.addCleanup(db.close)
+                db.execute(statement)
+                with self.assertRaisesRegex(ValueError, f"{what} already has"):
+                    clone.clone_rows(db, 1557, 3001, NAMES)
+
+    def test_rows_that_break_turn_10s_numbering_are_refused(self):
+        self.db.execute("INSERT INTO CarPartPositions VALUES (42, 1557, 2, 0.0)")
+        with self.assertRaisesRegex(ValueError, "CarPartPositions.ID 42 does not follow"):
+            clone.clone_rows(self.db, 1557, 3001, NAMES)
+
 
 if __name__ == "__main__":
     unittest.main()
