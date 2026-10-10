@@ -39,6 +39,13 @@ python tools\fh1_xds.py decode <file.xds> <out.png> [--level N]
 python tools\fh1_xds.py encode <stock.xds> <in.png> <out.xds>   # header and size come from the stock file
 ```
 
+`repaint_xds(stock, rgba)` is how liveries are written: the new level 0 must
+keep the stock alpha, and only the colour half of the DXT5 blocks whose texels
+changed is re-encoded, at level 0 and in each mip block whose footprint holds
+a changed texel. Every other byte (alpha halves, untouched blocks, padding,
+header) stays the stock file's, so the interior parts and badges that share
+the body texture come through unchanged.
+
 ### Evidence
 
 | Date | Check | Result |
@@ -46,6 +53,7 @@ python tools\fh1_xds.py encode <stock.xds> <in.png> <out.xds>   # header and siz
 | 2026-10-09 | `roundtrip` on every `.xds` of the stock Challenger SRT8 392 (1557, disc), Scion FR-S (1548, disc) and Mustang Boss 302 (1569, October Car Pack) | 60 textures: **54 DXT1/DXT5 byte-exact** (2048², 1024², 512², 128², 64² and non-square 220×100, 150×40, 128×64, 120×40, 128×16, 64×16, 32×16); 6 normal maps (format 49) skipped by design |
 | 2026-10-09 | `roundtrip --encode` (decode level 0, re-encode with mips, decode again) on the same 54 textures | level-0 error: worst mean **1.16/255**, worst max **33/255** (spec: 3 and 48); a 2048² texture with 12 levels in **5–21 s**; a car's body textures (incl. the stock colour variants) in 47–83 s (spec: 90 s per texture, 5 min per car) |
 | 2026-10-09 | In game, EU v4 build, `fh1-opening-sync` from a fresh profile in a scratch state: a private asset mod replaces all 8 `nodamage*` textures of the opening Viper (`VIP_Viper_13`, whose stripes are painted in its body texture) with `fh1_xds` re-encodes; the launcher rebuilds the archive (`zz-archive-patches`) and the game opens it 8 times (`mod.file.override`) | Opening drive reached; the car renders like the stock run: **1.4–1.6/255** mean difference over the car region (whole frame 7.0–7.6/255 from wall-time scenery motion); the same two pre-existing log errors as the stock run, nothing new |
+| 2026-10-11 | `repaint_xds` on the stock Challenger's `nodamage.xds` and `nodamage_LOD0.xds`: the decoded image unchanged, then a yellow rectangle over the top panel (0.45–0.75 × 0.62–0.70) | unchanged: **byte-identical** (1.7 s, 5.2 s); rectangle: 2,234 of 87,383 and 8,779 of 349,527 blocks re-encoded, **none outside the rectangle's footprint, alpha identical at every level**, 3.5 s and 15.2 s |
 
 ## Cloning a car (`tools/clone-fh1-car.py`)
 

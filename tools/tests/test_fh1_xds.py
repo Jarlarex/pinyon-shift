@@ -312,5 +312,85 @@ class EncodeTests(unittest.TestCase):
                                                                  bytes([10, 20, 30, 255]) * 64)), 4)
 
 
+def body_texture(width=64, height=64):
+    """A stock-like DXT5 body texture: a colour gradient, alpha 0 (paint area) on the left, 255 on the right."""
+    mips = max(width, height).bit_length()
+    rgba = b"".join(bytes((x * 255 // width, y * 255 // height, 90, 0 if x < width // 2 else 255))
+                    for y in range(height) for x in range(width))
+    return xds.write_xds(header(width, height, DXT5, mips, 0x4), rgba, width, height)
+
+
+def differing_blocks(a, b):
+    """Per level, the indices of the 16-byte blocks that differ."""
+    return [[i for i in range(len(x) // 16) if x[16 * i:16 * i + 16] != y[16 * i:16 * i + 16]]
+            for x, y in zip(xds.read_blocks(a), xds.read_blocks(b))]
+
+
+def recolour(rgba, width, texels, colour):
+    out = bytearray(rgba)
+    for x, y in texels:
+        out[4 * (y * width + x):4 * (y * width + x) + 3] = bytes(colour)
+    return bytes(out)
+
+
+class RepaintTests(unittest.TestCase):
+    def test_an_unchanged_image_gives_the_stock_bytes(self):
+        stock = body_texture()
+        self.assertEqual(xds.repaint_xds(stock, xds.decode_levels(stock)[0]), stock)
+
+    def test_one_changed_texel_reencodes_one_block_per_level(self):
+        stock = body_texture()
+        image = recolour(xds.decode_levels(stock)[0], 64, [(10, 10)], (255, 0, 255))
+        painted = xds.repaint_xds(stock, image)
+        # Texel (10, 10) sits in block (2, 2) of level 0, then (1, 1), then (0, 0) of every smaller level.
+        expected = [[2 * 16 + 2], [1 * 8 + 1], [0], [0], [0], [0], [0]]
+        for level, (found, allowed) in enumerate(zip(differing_blocks(stock, painted), expected)):
+            self.assertLessEqual(set(found), set(allowed), f"level {level}")
+        self.assertEqual(differing_blocks(stock, painted)[0], [34])
+        self.assertEqual(xds.decode_levels(painted)[0][4 * (10 * 64 + 10):4 * (10 * 64 + 10) + 3], bytes((255, 0, 255)))
+
+    def test_the_alpha_half_of_every_block_is_the_stock_one(self):
+        stock = body_texture()
+        image = recolour(xds.decode_levels(stock)[0], 64, [(x, y) for y in range(64) for x in range(64)], (20, 200, 40))
+        painted = xds.repaint_xds(stock, image)
+        for before, after in zip(xds.read_blocks(stock), xds.read_blocks(painted)):
+            self.assertEqual([before[i:i + 8] for i in range(0, len(before), 16)],
+                             [after[i:i + 8] for i in range(0, len(after), 16)])
+        self.assertEqual([level[3::4] for level in xds.decode_levels(painted)],
+                         [level[3::4] for level in xds.decode_levels(stock)])
+
+    def test_a_wide_texture_changes_only_the_painted_footprint(self):
+        stock = body_texture(128, 64)
+        image = recolour(xds.decode_levels(stock)[0], 128, [(x, y) for y in range(8) for x in range(120, 128)],
+                         (255, 255, 0))
+        changed = differing_blocks(stock, xds.repaint_xds(stock, image))
+        self.assertEqual(changed[0], [30, 31, 62, 63])        # blocks (30..31, 0..1) of a 32-block-wide level
+        self.assertLessEqual(set(changed[1]), {15})            # (15, 0) of 16 x 8 blocks
+        self.assertLessEqual(set(changed[2]), {7})
+
+    def test_padding_and_header_stay_the_stock_bytes(self):
+        stock = body_texture()
+        painted = xds.repaint_xds(stock, recolour(xds.decode_levels(stock)[0], 64, [(0, 0)], (1, 2, 3)))
+        self.assertEqual(painted[:xds.HEADER_SIZE], stock[:xds.HEADER_SIZE])
+        self.assertEqual(len(painted), len(stock))
+        rebuilt = xds.write_blocks(stock[:xds.HEADER_SIZE], xds.read_blocks(painted), template=stock)
+        self.assertEqual(rebuilt, painted)
+
+    def test_a_changed_alpha_is_refused(self):
+        stock = body_texture()
+        image = bytearray(xds.decode_levels(stock)[0])
+        image[3] ^= 0xFF
+        with self.assertRaisesRegex(ValueError, "alpha"):
+            xds.repaint_xds(stock, bytes(image))
+
+    def test_another_size_or_a_dxt1_texture_is_refused(self):
+        stock = body_texture()
+        with self.assertRaisesRegex(ValueError, "64x64"):
+            xds.repaint_xds(stock, bytes(32 * 32 * 4))
+        dxt1 = xds.write_xds(header(64, 64, DXT1, 7, 0x4), bytes(64 * 64 * 4), 64, 64)
+        with self.assertRaisesRegex(ValueError, "DXT5"):
+            xds.repaint_xds(dxt1, bytes(64 * 64 * 4))
+
+
 if __name__ == "__main__":
     unittest.main()

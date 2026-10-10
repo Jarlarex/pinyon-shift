@@ -236,23 +236,24 @@ def _decode_block(format: str, block: bytes) -> list[tuple[int, int, int, int]]:
     return texels
 
 
+def _decode_level(texture: Layout, level: Level, blocks: bytes) -> bytes:
+    width, height, columns = level.width, level.height, level.blocks[0]
+    rgba = bytearray(width * height * 4)
+    for index in range(len(blocks) // texture.block_bytes):
+        block = blocks[index * texture.block_bytes:(index + 1) * texture.block_bytes]
+        bx, by = (index % columns) * 4, (index // columns) * 4
+        for texel, value in enumerate(_decode_block(texture.format, block)):
+            x, y = bx + texel % 4, by + texel // 4
+            if x < width and y < height:
+                at = 4 * (y * width + x)
+                rgba[at:at + 4] = bytes(value)
+    return bytes(rgba)
+
+
 def decode_levels(data: bytes) -> list[bytes]:
     """Every mip level as RGBA8 rows (texel channels as stored; car textures use XYZW)."""
     texture = layout(data)
-    result = []
-    for level, blocks in zip(texture.levels, read_blocks(data)):
-        width, height, columns = level.width, level.height, level.blocks[0]
-        rgba = bytearray(width * height * 4)
-        for index in range(len(blocks) // texture.block_bytes):
-            block = blocks[index * texture.block_bytes:(index + 1) * texture.block_bytes]
-            bx, by = (index % columns) * 4, (index // columns) * 4
-            for texel, value in enumerate(_decode_block(texture.format, block)):
-                x, y = bx + texel % 4, by + texel // 4
-                if x < width and y < height:
-                    at = 4 * (y * width + x)
-                    rgba[at:at + 4] = bytes(value)
-        result.append(bytes(rgba))
-    return result
+    return [_decode_level(texture, level, blocks) for level, blocks in zip(texture.levels, read_blocks(data))]
 
 
 _PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
@@ -494,6 +495,67 @@ def write_xds(template_header: bytes, rgba: bytes, width: int, height: int) -> b
     levels = [_encode_level(texture.format, image, level.width, level.height, cache)
               for image, level in zip(images, texture.levels)]
     return write_blocks(template_header, levels)
+
+
+def _block_texels(rgba: bytes, width: int, height: int, bx: int, by: int) -> bytes:
+    """A 4x4 block's 64 RGBA bytes; edge blocks repeat the last texel row and column, as `_encode_level`."""
+    if (bx + 1) * 4 <= width and (by + 1) * 4 <= height:
+        return b"".join(rgba[4 * (y * width + 4 * bx):4 * (y * width + 4 * bx) + 16] for y in range(4 * by, 4 * by + 4))
+    spots = [4 * (min(y, height - 1) * width + min(x, width - 1))
+             for y in range(4 * by, 4 * by + 4) for x in range(4 * bx, 4 * bx + 4)]
+    return b"".join(rgba[at:at + 4] for at in spots)
+
+
+def _source_blocks(start: int, end: int, size: int, previous: int) -> range:
+    """The previous level's blocks (along one axis) that mip texels start..end-1 of a
+    `size`-texel level average, with `_downsample`'s mapping."""
+    first = start * previous // size
+    last = max((end - 1) * previous // size + 1, end * previous // size)
+    return range(first // 4, (last + 3) // 4)
+
+
+def repaint_xds(stock: bytes, rgba: bytes) -> bytes:
+    """`stock` with its colours replaced by level 0 `rgba`, whose alpha must be the
+    stock texture's own. Only the colour half of the DXT5 blocks whose texels
+    changed is re-encoded, at level 0 and in every mip block whose footprint holds
+    a changed texel (colours from mips of the new image); every other byte,
+    including each block's alpha half, padding and header, is the stock file's."""
+    texture = layout(stock)
+    if texture.format != "DXT5":
+        raise ValueError("only DXT5 body textures can be repainted")
+    base = texture.levels[0]
+    width, height = base.width, base.height
+    if len(rgba) != width * height * 4:
+        raise ValueError(f"the texture needs a {width}x{height} RGBA image")
+    blocks = read_blocks(stock)
+    original = _decode_level(texture, base, blocks[0])
+    if rgba[3::4] != original[3::4]:
+        raise ValueError("a repaint keeps the stock alpha, but the image's alpha differs from the texture's")
+    columns, rows = base.blocks
+    changed = {(bx, by) for by in range(rows) for bx in range(columns)
+               if _block_texels(rgba, width, height, bx, by) != _block_texels(original, width, height, bx, by)}
+    if not changed:
+        return stock
+    images = [rgba] + make_mips(rgba, width, height, [(level.width, level.height) for level in texture.levels[1:]])
+    levels, cache = [], {}
+    for index, (level, image) in enumerate(zip(texture.levels, images)):
+        if index:
+            pw, ph = texture.levels[index - 1].width, texture.levels[index - 1].height
+            lw, lh = level.width, level.height
+            changed = {(bx, by) for bx in range(level.blocks[0]) for by in range(level.blocks[1])
+                       if any((x, y) in changed
+                              for y in _source_blocks(4 * by, min(4 * by + 4, lh), lh, ph)
+                              for x in _source_blocks(4 * bx, min(4 * bx + 4, lw), lw, pw))}
+        out = bytearray(blocks[index])
+        for bx, by in changed:
+            raw = _block_texels(image, level.width, level.height, bx, by)
+            colour = cache.get(raw)
+            if colour is None:
+                colour = cache[raw] = _encode_block("DXT5", [tuple(raw[i:i + 4]) for i in range(0, 64, 4)])[8:]
+            at = 16 * (by * level.blocks[0] + bx)
+            out[at + 8:at + 16] = colour
+        levels.append(bytes(out))
+    return write_blocks(stock[:HEADER_SIZE], levels, template=stock)
 
 
 def roundtrip(data: bytes, encode: bool = False) -> dict:
