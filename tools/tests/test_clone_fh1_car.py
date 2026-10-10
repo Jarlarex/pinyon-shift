@@ -416,6 +416,79 @@ class RowCloneTests(unittest.TestCase):
             clone.clone_rows(self.db, 1557, 3001, NAMES)
 
 
+def fbf_path(text):
+    """A dash .fbf string: big-endian u32 length, then the text."""
+    return struct.pack(">I", len(text)) + text.encode()
+
+
+class ModelTreeTests(unittest.TestCase):
+    def name(self, member):
+        return clone.clone_member_name(member, "DOD_Car_12", "DOD_Car_RSE_12")
+
+    def test_model_files_stripped_copies_build_report_and_exporter_settings_take_the_new_name(self):
+        for stock, new in (("DOD_Car_12.carbin", "DOD_Car_RSE_12.carbin"),
+                           ("DOD_Car_12_lod0.carbin", "DOD_Car_RSE_12_lod0.carbin"),
+                           ("DOD_Car_12_cockpit.carbin", "DOD_Car_RSE_12_cockpit.carbin"),
+                           ("DOD_Car_12_caliperLF_LOD0.carbin", "DOD_Car_RSE_12_caliperLF_LOD0.carbin"),
+                           ("stripped_dod_car_12_rotorrr_lod0.carbin", "stripped_dod_car_rse_12_rotorrr_lod0.carbin"),
+                           ("cars_DOD_Car_12_build_report.html", "cars_DOD_Car_RSE_12_build_report.html"),
+                           ("Last_dod_car_12.xml", "Last_dod_car_rse_12.xml"),
+                           ("DOD_CAR_12_caliperRR_LOD0.carbin", "DOD_CAR_RSE_12_caliperRR_LOD0.carbin")):
+            self.assertEqual(self.name(stock), new)
+
+    def test_the_dash_is_renamed_because_the_game_finds_it_by_media_name(self):
+        # v4 builds <car folder>\digitalgauge\Dash_<media>.bgf; Turn 10 renamed it on the Pizza Hut.
+        for extension in ("bgf", "bsg", "fbf"):
+            self.assertEqual(self.name(f"DigitalGauge/Dash_DOD_Car_12.{extension}"),
+                             f"DigitalGauge/Dash_DOD_Car_RSE_12.{extension}")
+
+    def test_gauge_textures_and_other_files_keep_their_names(self):
+        for kept in ("DigitalGauge/DOD_CAR_12_GEAR_R.XDS", "DigitalGauge/ALF_8C_08_TEXT_MI.XDS", "nodamage.xds",
+                     "nodamagestripe_LOD0.xds", "LiveryMasks/Masks.xml", "Physics/MAXData.xml", "CarAttribs.xml"):
+            self.assertEqual(self.name(kept), kept)
+
+    def test_dash_texture_paths_follow_the_car_to_its_new_folder(self):
+        own = r"GAME:\MEDIA\CARS\DOD_CAR_12\DIGITALGAUGE\DOD_CAR_12_GEAR_R.TGA"
+        shared = r"GAME:\MEDIA\CARS\SHARED\DASHBOARDS\AUD_TEXT_FM.TGA"
+        data = b"\x00\x00\x03\xf0" + fbf_path("DOD_CAR_12_GEAR_R.TGA") + fbf_path(own) + b"\x3f\x80" + fbf_path(shared)
+        self.assertEqual(clone.rewrite_dash_paths(data, "DOD_Car_12", "DOD_Car_RSE_12"),
+                         b"\x00\x00\x03\xf0" + fbf_path("DOD_CAR_12_GEAR_R.TGA")
+                         + fbf_path(r"GAME:\MEDIA\CARS\DOD_CAR_RSE_12\DIGITALGAUGE\DOD_CAR_12_GEAR_R.TGA")
+                         + b"\x3f\x80" + fbf_path(shared))
+
+    def test_a_dash_path_without_its_length_is_refused(self):
+        data = b"\x00\x00\x00\x02" + rb"GAME:\MEDIA\CARS\DOD_CAR_12\X.TGA"
+        with self.assertRaisesRegex(ValueError, "dash file"):
+            clone.rewrite_dash_paths(data, "DOD_Car_12", "DOD_Car_RSE_12")
+
+    def test_the_tree_holds_every_member_and_the_renamed_audio(self):
+        dash = fbf_path(r"GAME:\MEDIA\CARS\DOD_CAR_12\DIGITALGAUGE\G.TGA")
+        car_files = {"DOD_Car_12.carbin": b"model", "nodamage.xds": b"paint", "DigitalGauge/Dash_DOD_Car_12.fbf": dash,
+                     "DigitalGauge/G.XDS": b"gauge"}
+        audio = {"CarModelTuning": b"<cmt/>", "EngineTuning": b"<et/>"}
+        staged, records = clone.clone_files(car_files, audio, "DOD_Car_12", "DOD_Car_RSE_12")
+        self.assertEqual(staged, {
+            "media/cars/DOD_Car_RSE_12/DOD_Car_RSE_12.carbin": b"model",
+            "media/cars/DOD_Car_RSE_12/nodamage.xds": b"paint",
+            "media/cars/DOD_Car_RSE_12/DigitalGauge/Dash_DOD_Car_RSE_12.fbf":
+                fbf_path(r"GAME:\MEDIA\CARS\DOD_CAR_RSE_12\DIGITALGAUGE\G.TGA"),
+            "media/cars/DOD_Car_RSE_12/DigitalGauge/G.XDS": b"gauge",
+            "media/audio/cars/CarModelTuning/DOD_Car_RSE_12_CMT.xml": b"<cmt/>",
+            "media/audio/cars/Engines/EngineTuning/DOD_Car_RSE_12_ET.xml": b"<et/>"})
+        by_path = {record["path"]: record for record in records}
+        self.assertEqual(by_path["media/cars/DOD_Car_RSE_12/nodamage.xds"],
+                         {"source": "nodamage.xds", "path": "media/cars/DOD_Car_RSE_12/nodamage.xds", "size": 5,
+                          "sha256": hashlib.sha256(b"paint").hexdigest(), "renamed": False, "rewritten": False})
+        self.assertTrue(by_path["media/cars/DOD_Car_RSE_12/DigitalGauge/Dash_DOD_Car_RSE_12.fbf"]["rewritten"])
+        self.assertEqual(by_path["media/audio/cars/CarModelTuning/DOD_Car_RSE_12_CMT.xml"]["source"],
+                         "CarModelTuning/DOD_Car_12_CMT.xml")
+
+    def test_two_members_landing_on_one_name_are_refused(self):
+        with self.assertRaisesRegex(ValueError, "(?i)written as media/cars/DOD_Car_RSE_12/DOD_Car_RSE_12.carbin"):
+            clone.clone_files({"DOD_Car_12.carbin": b"a", "dod_car_12.carbin": b"b"}, {}, "DOD_Car_12",
+                              "DOD_Car_RSE_12")
+
+
 class StringKeyTests(unittest.TestCase):
     def test_a_reference_names_the_data_car_table_and_the_key(self):
         # The Pizza Hut Mustang's name: table 0xCD49, key 7451.

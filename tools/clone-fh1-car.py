@@ -6,6 +6,7 @@ the stock car's model files under a new media name, its audio tuning, and a
 merge database with its rows copied to a new car ID. Every source is read
 only; nothing in the disc, the title update or an installed package changes.
 """
+import hashlib
 import re
 import sqlite3
 import struct
@@ -168,6 +169,77 @@ class Sources:
             else:
                 raise ValueError(f"no {kind} file for car {media_name}")
         return found
+
+
+# -- model tree -------------------------------------------------------------
+
+CAR_FOLDER = "media/cars/{}/"
+AUDIO_FILES = {"CarModelTuning": "media/audio/cars/CarModelTuning/{}_CMT.xml",
+               "EngineTuning": "media/audio/cars/Engines/EngineTuning/{}_ET.xml"}
+
+
+def _same_case(written: str, media: str) -> str:
+    """`media` in the case a file name wrote the stock media name in (the stripped_ copies are lowercase)."""
+    return media.lower() if written.islower() else media.upper() if written.isupper() else media
+
+
+def clone_member_name(name: str, stock: str, new: str) -> str:
+    """A model-archive member's name in the clone, as Turn 10 named the Pizza
+    Hut's: the stock media name, in whatever case the file wrote it, becomes the
+    new one (model files, stripped_ copies, build report, exporter settings).
+    In DigitalGauge only Dash_<media>.* is renamed, since the game opens
+    <car>\\digitalgauge\\Dash_<media>.bgf; its gauge textures keep their names,
+    which the dash's .fbf uses."""
+    folder, _, base = name.replace("\\", "/").rpartition("/")
+    if folder.lower() == "digitalgauge" and not base.lower().startswith(f"dash_{stock.lower()}"):
+        return name
+    base = re.sub(re.escape(stock), lambda match: _same_case(match.group(), new), base, flags=re.IGNORECASE)
+    return f"{folder}/{base}" if folder else base
+
+
+def rewrite_dash_paths(data: bytes, stock: str, new: str) -> bytes:
+    """A dash .fbf names its textures by absolute path, each a big-endian u32
+    length then GAME:\\MEDIA\\CARS\\<MEDIA>\\DIGITALGAUGE\\<texture>; the paths
+    into the stock car's folder are pointed at the clone's. Turn 10's Pizza
+    Hut .fbf is the Boss 302's with exactly this change (plus its own font and
+    placeholder text). Paths into other folders (SHARED) stay."""
+    folder = re.compile(rb"(?i)(GAME:\\MEDIA\\CARS\\)(" + re.escape(stock.encode()) + rb")\\")
+    out, at = bytearray(), 0
+    for match in folder.finditer(data):
+        start = match.start() - 4
+        length = struct.unpack_from(">I", data, start)[0] if start >= at else 0
+        if length < len(match.group()) or match.start() + length > len(data):
+            raise ValueError(f"unexpected dash file layout at byte {match.start()}: car-clone cannot point its "
+                             "texture paths at the new car")
+        replacement = match.group(1) + _same_case(match.group(2).decode(), new).encode() + b"\\"
+        out += data[at:start] + struct.pack(">I", length + len(replacement) - len(match.group())) + replacement
+        at = match.end()
+    return bytes(out + data[at:])
+
+
+def clone_files(car_files: dict[str, bytes], audio: dict[str, bytes], stock: str,
+                new: str) -> tuple[dict[str, bytes], list[dict]]:
+    """The clone's model tree and audio tuning in package layout (path -> bytes),
+    and one record per file: its source, size, SHA-256 and whether it was
+    renamed or its dash texture paths rewritten. Every other byte is the stock car's."""
+    staged: dict[str, bytes] = {}
+    records = []
+
+    def add(source: str, path: str, data: bytes, renamed: bool) -> None:
+        if any(path.lower() == other.lower() for other in staged):
+            raise ValueError(f"two stock files would both be written as {path}")
+        out = rewrite_dash_paths(data, stock, new) if path.lower().endswith(".fbf") else data
+        staged[path] = out
+        records.append({"source": source, "path": path, "size": len(out), "sha256": hashlib.sha256(out).hexdigest(),
+                        "renamed": renamed, "rewritten": out != data})
+
+    for name, data in sorted(car_files.items()):
+        renamed = clone_member_name(name, stock, new)
+        add(name, CAR_FOLDER.format(new) + renamed, data, renamed != name)
+    for kind, data in sorted(audio.items()):
+        source = AUDIO_FILES[kind].format(stock).replace("media/audio/cars/", "").replace("Engines/", "")
+        add(source, AUDIO_FILES[kind].format(new), data, True)
+    return staged, records
 
 
 # -- names ------------------------------------------------------------------
