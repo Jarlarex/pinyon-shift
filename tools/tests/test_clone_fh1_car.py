@@ -179,6 +179,7 @@ class SourcesTests(unittest.TestCase):
         self.addCleanup(con.close)
         self.assertFalse(con.in_transaction)
         copy = sqlite3.connect(":memory:")
+        self.addCleanup(copy.close)
         copy.deserialize(con.serialize())
         self.assertEqual(len(copy.execute("SELECT Id FROM Data_Car").fetchall()), 3)
 
