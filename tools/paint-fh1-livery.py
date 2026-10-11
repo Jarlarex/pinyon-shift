@@ -597,6 +597,76 @@ def panel_previews(files: dict[str, bytes], panels: dict[str, Panel] | None, out
             "coverage": coverage}
 
 
+# -- probe ------------------------------------------------------------------
+
+PROBE_MOD = "livery-probe"
+# Each quadrant of a panel holds a large patch whose colour names its corner of the frame: white at
+# the front-top (u < 0.5, v < 0.5), black at the rear-top, magenta at the front-bottom and cyan at
+# the rear-bottom. The colours stay apart under any showroom light and none is a panel colour, so a
+# capture shows where u and v run on the car and whether a frame is mirrored, even when wheel arches
+# or windows hide part of a panel. On the top panel "top" is the car's left; on the front and rear
+# panels u runs from the car's left to its right.
+QUADRANT_COLOURS = {(0, 0): (255, 255, 255), (1, 0): (0, 0, 0), (0, 1): (240, 50, 230), (1, 1): (70, 240, 240)}
+PATCH = (0.08, 0.42)                       # each patch's extent inside its half, along u and along v
+
+
+def probe_texel(colour: tuple[int, int, int], u: float, v: float, length: float, tall: float) -> tuple[int, int, int]:
+    """The probe's colour at panel coordinates (u, v) of a panel `length` x `tall` texels."""
+    qu, qv = int(u >= 0.5), int(v >= 0.5)
+    if PATCH[0] <= u - 0.5 * qu <= PATCH[1] and PATCH[0] <= v - 0.5 * qv <= PATCH[1]:
+        return QUADRANT_COLOURS[(qu, qv)]
+    if abs(u * 10 - round(u * 10)) * length / 10 < 0.5 or abs(v * 10 - round(v * 10)) * tall / 10 < 0.5:
+        return tuple(c // 2 for c in colour)
+    return colour
+
+
+def probe_image(stock: bytes, width: int, height: int, panels: dict[str, Panel],
+                alpha0_panel: str | None = None) -> bytes:
+    """A test pattern over a stock texture's level 0 for checking a panel table in game: each panel
+    opaque in its own colour with a 0.1 grid and the quadrant patches of `probe_texel`.
+    `alpha0_panel` keeps its stock alpha instead, to see how the title shows colour in the paint area."""
+    if alpha0_panel is not None and alpha0_panel not in panels:
+        raise ValueError(f"no panel {alpha0_panel} in the table")
+    out = bytearray(stock)
+    for index, (name, panel) in enumerate(sorted(panels.items())):
+        colour = PANEL_COLOURS[index % len(PANEL_COLOURS)]
+        length, tall = panel.frame.size(width, height)
+        mask = polygon_mask(panel.outline, width, height)
+        for run in re.finditer(rb"\x01+", bytes(mask)):
+            for i in range(*run.span()):
+                u, v = panel.frame.to_panel((i % width + 0.5) / width, (i // width + 0.5) / height)
+                out[4 * i:4 * i + 3] = bytes(probe_texel(colour, u, v, length, tall))
+                if name != alpha0_panel:
+                    out[4 * i + 3] = 255
+    return bytes(out)
+
+
+def write_probe(files: dict[str, bytes], archive: str, panels: dict[str, Panel], output: Path,
+                alpha0_panel: str | None = None) -> dict:
+    """The probe painted into every body texture of a stock car (nodamage, nodamage_LOD0 and Turn
+    10's colour and stripe variants of them, which share their layout: the Autoshow shows the
+    Challenger in its striped variant), written as the private asset mod
+    <output>/mods/livery-probe/members/<archive>/<member> (re-encoded whole, since its alpha changes)."""
+    members = {name.lower(): name for name in files if "/" not in name}
+    mod = Path(output) / "mods" / PROBE_MOD
+    written = []
+    for name in BODY_TEXTURES:
+        if name.lower() not in members:
+            raise ValueError(f"the stock car has no {name}")
+    for member in sorted(name for lower, name in members.items() if re.fullmatch(r"nodamage.*\.xds", lower)):
+        stock = files[member]
+        texture = xds.layout(stock)
+        image = probe_image(xds.decode_level(stock, 0), texture.width, texture.height, panels, alpha0_panel)
+        path = mod / "members" / archive / member
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(xds.write_xds(stock[:xds.HEADER_SIZE], image, texture.width, texture.height))
+        written.append(path.relative_to(output).as_posix())
+    (mod / "mod.toml").write_text(f'name = "{PROBE_MOD}"\nversion = "1.0.0"\nabi = 1\n', encoding="utf-8")
+    legend = {name: "%02x%02x%02x" % PANEL_COLOURS[index % len(PANEL_COLOURS)]
+              for index, name in enumerate(sorted(panels))}
+    return {"mod": str(mod), "files": written, "legend": legend, "alpha0_panel": alpha0_panel}
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     commands = parser.add_subparsers(dest="command", required=True)
@@ -611,7 +681,14 @@ def main(argv: list[str] | None = None) -> int:
     panels.add_argument("--stock-media", required=True)
     panels.add_argument("--output", type=Path, required=True, help="a local folder for the previews")
     panels.add_argument("--extractor", type=Path, help="archive extractor (default: the one the build made)")
-    for command in (paint, panels):
+    probe = commands.add_parser("probe", help="the probe livery on a stock car, as a private asset mod")
+    probe.add_argument("--state-root", type=Path, required=True, help="the installed preview state (.local/preview)")
+    probe.add_argument("--game-root", type=Path, required=True, help="the extracted disc (.local/game/eur-base)")
+    probe.add_argument("--stock-media", required=True)
+    probe.add_argument("--output", type=Path, required=True, help="a state folder whose mods/ receives the probe")
+    probe.add_argument("--alpha0-panel", help="paint this panel's colour under the stock alpha instead")
+    probe.add_argument("--extractor", type=Path, help="archive extractor (default: the one the build made)")
+    for command in (paint, panels, probe):
         command.add_argument("--panels", type=Path, default=PANEL_TABLES, help=argparse.SUPPRESS)
         command.add_argument("--ids", type=Path, default=ID_TABLE, help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
@@ -619,9 +696,20 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "paint":
             recipe = load_recipe(args.recipe, art_dir=args.art, panel_tables=args.panels, id_table=args.ids)
             report = paint_livery(recipe, args.clone, preview=args.preview)
-        else:
+        elif args.command == "panels":
             report = {"stock_media": args.stock_media} | panel_previews(
                 _stock_files(args, args.stock_media), _table_or_none(args.panels, args.stock_media), args.output)
+        else:
+            table = _table_or_none(args.panels, args.stock_media)
+            if table is None:
+                raise ValueError(f"no panel table for {args.stock_media} in {args.panels}")
+            sources = _sources(args)
+            source = sources.car_source(args.stock_media)
+            if source is None or source[1]:
+                raise ValueError(f"{args.stock_media} is not a disc car; the probe replaces members of its disc archive")
+            archive = source[0].relative_to(args.game_root.absolute()).as_posix()
+            report = {"stock_media": args.stock_media} | write_probe(
+                sources.car_files(args.stock_media), archive, table, args.output, args.alpha0_panel)
     except (OSError, ValueError) as error:
         print(str(error), file=sys.stderr)
         return 1
@@ -629,12 +717,16 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def _stock_files(args, media: str) -> dict[str, bytes]:
-    """A stock car's archive members, read only, through car-clone's sources."""
+def _sources(args):
+    """car-clone's read-only view of the player's files."""
     extractor = args.extractor or _load_tool("manage-fh1-dlc").default_extractor()
-    sources = _load_tool("clone-fh1-car").Sources(args.state_root.absolute(), args.game_root.absolute(),
-                                                  extractor.resolve())   # CreateProcess needs an absolute path
-    return sources.car_files(media)
+    return _load_tool("clone-fh1-car").Sources(args.state_root.absolute(), args.game_root.absolute(),
+                                               extractor.resolve())      # CreateProcess needs an absolute path
+
+
+def _stock_files(args, media: str) -> dict[str, bytes]:
+    """A stock car's archive members, read only."""
+    return _sources(args).car_files(media)
 
 
 def _table_or_none(folder: Path, media: str) -> dict[str, Panel] | None:

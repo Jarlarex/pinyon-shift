@@ -1,0 +1,305 @@
+pinyon-shift-fh1-render-test-v1
+# livery-paint probe check (SPEC-livery-paint criterion 2): the probe livery on the stock
+# RUF CTR Yellowbird (1516) in the Autoshow showroom, from every side.
+# Seed: a render seed of the .local/preview save (it spawns at Dak's Garage with enough credits),
+# with `tools/paint-fh1-livery.py probe --stock-media RUF_Yellowbird_87 --output <seed>`,
+# `tools/build-mod-archives.py <seed>` and enabled_mods "zz-archive-patches,livery-probe" in the
+# seed's config/pinyon_shift.toml. With a mod on the title first copies the profile into
+# user-modded, so the menu shows later and A is pressed again at frames 1000-1300.
+# Route: pause, MAP, the cursor nudged onto the Autoshow, Y fast travel, A; X enters the Autoshow;
+# right 46 times to RUF (the carousel order with the 16 EU packages installed), A; right
+# 1 times to the car, A: the showroom. The right stick then orbits the camera (41 captures)
+# and a raised camera adds the rear (13 captures). Each panel shows its colour, each quadrant its
+# patch: front-top white, rear-top black, front-bottom magenta, rear-bottom cyan.
+input 0 0000 0 0 0 0 0 0
+input 360 1000 0 0 0 0 0 0
+input 366 0000 0 0 0 0 0 0
+input 480 1000 0 0 0 0 0 0
+input 486 0000 0 0 0 0 0 0
+input 600 1000 0 0 0 0 0 0
+input 606 0000 0 0 0 0 0 0
+input 720 1000 0 0 0 0 0 0
+input 726 0000 0 0 0 0 0 0
+input 1000 1000 0 0 0 0 0 0
+input 1006 0000 0 0 0 0 0 0
+input 1150 1000 0 0 0 0 0 0
+input 1156 0000 0 0 0 0 0 0
+input 1300 1000 0 0 0 0 0 0
+input 1306 0000 0 0 0 0 0 0
+wait 1400 4000 freeroam
+capture 1700 free-roam
+input 2350 0010 0 0 0 0 0 0
+input 2356 0000 0 0 0 0 0 0
+input 2600 1000 0 0 0 0 0 0
+input 2606 0000 0 0 0 0 0 0
+input 3020 0000 0 0 20000 15000 0 0
+input 3035 0000 0 0 0 0 0 0
+input 3100 8000 0 0 0 0 0 0
+input 3106 0000 0 0 0 0 0 0
+input 3250 1000 0 0 0 0 0 0
+input 3256 0000 0 0 0 0 0 0
+capture 4800 arrived
+input 4850 4000 0 0 0 0 0 0
+input 4856 0000 0 0 0 0 0 0
+capture 5250 makes
+input 5450 0008 0 0 0 0 0 0
+input 5456 0000 0 0 0 0 0 0
+input 5480 0008 0 0 0 0 0 0
+input 5486 0000 0 0 0 0 0 0
+input 5510 0008 0 0 0 0 0 0
+input 5516 0000 0 0 0 0 0 0
+input 5540 0008 0 0 0 0 0 0
+input 5546 0000 0 0 0 0 0 0
+input 5570 0008 0 0 0 0 0 0
+input 5576 0000 0 0 0 0 0 0
+input 5600 0008 0 0 0 0 0 0
+input 5606 0000 0 0 0 0 0 0
+input 5630 0008 0 0 0 0 0 0
+input 5636 0000 0 0 0 0 0 0
+input 5660 0008 0 0 0 0 0 0
+input 5666 0000 0 0 0 0 0 0
+input 5690 0008 0 0 0 0 0 0
+input 5696 0000 0 0 0 0 0 0
+input 5720 0008 0 0 0 0 0 0
+input 5726 0000 0 0 0 0 0 0
+input 5750 0008 0 0 0 0 0 0
+input 5756 0000 0 0 0 0 0 0
+input 5780 0008 0 0 0 0 0 0
+input 5786 0000 0 0 0 0 0 0
+input 5810 0008 0 0 0 0 0 0
+input 5816 0000 0 0 0 0 0 0
+input 5840 0008 0 0 0 0 0 0
+input 5846 0000 0 0 0 0 0 0
+input 5870 0008 0 0 0 0 0 0
+input 5876 0000 0 0 0 0 0 0
+input 5900 0008 0 0 0 0 0 0
+input 5906 0000 0 0 0 0 0 0
+input 5930 0008 0 0 0 0 0 0
+input 5936 0000 0 0 0 0 0 0
+input 5960 0008 0 0 0 0 0 0
+input 5966 0000 0 0 0 0 0 0
+input 5990 0008 0 0 0 0 0 0
+input 5996 0000 0 0 0 0 0 0
+input 6020 0008 0 0 0 0 0 0
+input 6026 0000 0 0 0 0 0 0
+input 6050 0008 0 0 0 0 0 0
+input 6056 0000 0 0 0 0 0 0
+input 6080 0008 0 0 0 0 0 0
+input 6086 0000 0 0 0 0 0 0
+input 6110 0008 0 0 0 0 0 0
+input 6116 0000 0 0 0 0 0 0
+input 6140 0008 0 0 0 0 0 0
+input 6146 0000 0 0 0 0 0 0
+input 6170 0008 0 0 0 0 0 0
+input 6176 0000 0 0 0 0 0 0
+input 6200 0008 0 0 0 0 0 0
+input 6206 0000 0 0 0 0 0 0
+input 6230 0008 0 0 0 0 0 0
+input 6236 0000 0 0 0 0 0 0
+input 6260 0008 0 0 0 0 0 0
+input 6266 0000 0 0 0 0 0 0
+input 6290 0008 0 0 0 0 0 0
+input 6296 0000 0 0 0 0 0 0
+input 6320 0008 0 0 0 0 0 0
+input 6326 0000 0 0 0 0 0 0
+input 6350 0008 0 0 0 0 0 0
+input 6356 0000 0 0 0 0 0 0
+input 6380 0008 0 0 0 0 0 0
+input 6386 0000 0 0 0 0 0 0
+input 6410 0008 0 0 0 0 0 0
+input 6416 0000 0 0 0 0 0 0
+input 6440 0008 0 0 0 0 0 0
+input 6446 0000 0 0 0 0 0 0
+input 6470 0008 0 0 0 0 0 0
+input 6476 0000 0 0 0 0 0 0
+input 6500 0008 0 0 0 0 0 0
+input 6506 0000 0 0 0 0 0 0
+input 6530 0008 0 0 0 0 0 0
+input 6536 0000 0 0 0 0 0 0
+input 6560 0008 0 0 0 0 0 0
+input 6566 0000 0 0 0 0 0 0
+input 6590 0008 0 0 0 0 0 0
+input 6596 0000 0 0 0 0 0 0
+input 6620 0008 0 0 0 0 0 0
+input 6626 0000 0 0 0 0 0 0
+input 6650 0008 0 0 0 0 0 0
+input 6656 0000 0 0 0 0 0 0
+input 6680 0008 0 0 0 0 0 0
+input 6686 0000 0 0 0 0 0 0
+input 6710 0008 0 0 0 0 0 0
+input 6716 0000 0 0 0 0 0 0
+input 6740 0008 0 0 0 0 0 0
+input 6746 0000 0 0 0 0 0 0
+input 6770 0008 0 0 0 0 0 0
+input 6776 0000 0 0 0 0 0 0
+input 6800 0008 0 0 0 0 0 0
+input 6806 0000 0 0 0 0 0 0
+capture 6870 make
+input 6890 1000 0 0 0 0 0 0
+input 6896 0000 0 0 0 0 0 0
+input 7330 0008 0 0 0 0 0 0
+input 7336 0000 0 0 0 0 0 0
+capture 7400 card
+input 7420 1000 0 0 0 0 0 0
+input 7426 0000 0 0 0 0 0 0
+capture 7980 orbit-00
+input 7990 0000 0 0 0 0 22000 0
+input 7996 0000 0 0 0 0 0 0
+capture 8020 orbit-01
+input 8030 0000 0 0 0 0 22000 0
+input 8036 0000 0 0 0 0 0 0
+capture 8060 orbit-02
+input 8070 0000 0 0 0 0 22000 0
+input 8076 0000 0 0 0 0 0 0
+capture 8100 orbit-03
+input 8110 0000 0 0 0 0 22000 0
+input 8116 0000 0 0 0 0 0 0
+capture 8140 orbit-04
+input 8150 0000 0 0 0 0 22000 0
+input 8156 0000 0 0 0 0 0 0
+capture 8180 orbit-05
+input 8190 0000 0 0 0 0 22000 0
+input 8196 0000 0 0 0 0 0 0
+capture 8220 orbit-06
+input 8230 0000 0 0 0 0 22000 0
+input 8236 0000 0 0 0 0 0 0
+capture 8260 orbit-07
+input 8270 0000 0 0 0 0 22000 0
+input 8276 0000 0 0 0 0 0 0
+capture 8300 orbit-08
+input 8310 0000 0 0 0 0 22000 0
+input 8316 0000 0 0 0 0 0 0
+capture 8340 orbit-09
+input 8350 0000 0 0 0 0 22000 0
+input 8356 0000 0 0 0 0 0 0
+capture 8380 orbit-10
+input 8390 0000 0 0 0 0 22000 0
+input 8396 0000 0 0 0 0 0 0
+capture 8420 orbit-11
+input 8430 0000 0 0 0 0 22000 0
+input 8436 0000 0 0 0 0 0 0
+capture 8460 orbit-12
+input 8470 0000 0 0 0 0 22000 0
+input 8476 0000 0 0 0 0 0 0
+capture 8500 orbit-13
+input 8510 0000 0 0 0 0 22000 0
+input 8516 0000 0 0 0 0 0 0
+capture 8540 orbit-14
+input 8550 0000 0 0 0 0 22000 0
+input 8556 0000 0 0 0 0 0 0
+capture 8580 orbit-15
+input 8590 0000 0 0 0 0 22000 0
+input 8596 0000 0 0 0 0 0 0
+capture 8620 orbit-16
+input 8630 0000 0 0 0 0 22000 0
+input 8636 0000 0 0 0 0 0 0
+capture 8660 orbit-17
+input 8670 0000 0 0 0 0 22000 0
+input 8676 0000 0 0 0 0 0 0
+capture 8700 orbit-18
+input 8710 0000 0 0 0 0 22000 0
+input 8716 0000 0 0 0 0 0 0
+capture 8740 orbit-19
+input 8750 0000 0 0 0 0 22000 0
+input 8756 0000 0 0 0 0 0 0
+capture 8780 orbit-20
+input 8790 0000 0 0 0 0 22000 0
+input 8796 0000 0 0 0 0 0 0
+capture 8820 orbit-21
+input 8830 0000 0 0 0 0 22000 0
+input 8836 0000 0 0 0 0 0 0
+capture 8860 orbit-22
+input 8870 0000 0 0 0 0 22000 0
+input 8876 0000 0 0 0 0 0 0
+capture 8900 orbit-23
+input 8910 0000 0 0 0 0 22000 0
+input 8916 0000 0 0 0 0 0 0
+capture 8940 orbit-24
+input 8950 0000 0 0 0 0 22000 0
+input 8956 0000 0 0 0 0 0 0
+capture 8980 orbit-25
+input 8990 0000 0 0 0 0 22000 0
+input 8996 0000 0 0 0 0 0 0
+capture 9020 orbit-26
+input 9030 0000 0 0 0 0 22000 0
+input 9036 0000 0 0 0 0 0 0
+capture 9060 orbit-27
+input 9070 0000 0 0 0 0 22000 0
+input 9076 0000 0 0 0 0 0 0
+capture 9100 orbit-28
+input 9110 0000 0 0 0 0 22000 0
+input 9116 0000 0 0 0 0 0 0
+capture 9140 orbit-29
+input 9150 0000 0 0 0 0 22000 0
+input 9156 0000 0 0 0 0 0 0
+capture 9180 orbit-30
+input 9190 0000 0 0 0 0 22000 0
+input 9196 0000 0 0 0 0 0 0
+capture 9220 orbit-31
+input 9230 0000 0 0 0 0 22000 0
+input 9236 0000 0 0 0 0 0 0
+capture 9260 orbit-32
+input 9270 0000 0 0 0 0 22000 0
+input 9276 0000 0 0 0 0 0 0
+capture 9300 orbit-33
+input 9310 0000 0 0 0 0 22000 0
+input 9316 0000 0 0 0 0 0 0
+capture 9340 orbit-34
+input 9350 0000 0 0 0 0 22000 0
+input 9356 0000 0 0 0 0 0 0
+capture 9380 orbit-35
+input 9390 0000 0 0 0 0 22000 0
+input 9396 0000 0 0 0 0 0 0
+capture 9420 orbit-36
+input 9430 0000 0 0 0 0 22000 0
+input 9436 0000 0 0 0 0 0 0
+capture 9460 orbit-37
+input 9470 0000 0 0 0 0 22000 0
+input 9476 0000 0 0 0 0 0 0
+capture 9500 orbit-38
+input 9510 0000 0 0 0 0 22000 0
+input 9516 0000 0 0 0 0 0 0
+capture 9540 orbit-39
+input 9550 0000 0 0 0 0 22000 0
+input 9556 0000 0 0 0 0 0 0
+capture 9580 orbit-40
+input 9590 0000 0 0 0 0 0 30000
+input 9670 0000 0 0 0 0 0 0
+capture 9710 high-00
+input 9720 0000 0 0 0 0 22000 0
+input 9728 0000 0 0 0 0 0 0
+capture 9755 high-01
+input 9765 0000 0 0 0 0 22000 0
+input 9773 0000 0 0 0 0 0 0
+capture 9800 high-02
+input 9810 0000 0 0 0 0 22000 0
+input 9818 0000 0 0 0 0 0 0
+capture 9845 high-03
+input 9855 0000 0 0 0 0 22000 0
+input 9863 0000 0 0 0 0 0 0
+capture 9890 high-04
+input 9900 0000 0 0 0 0 22000 0
+input 9908 0000 0 0 0 0 0 0
+capture 9935 high-05
+input 9945 0000 0 0 0 0 22000 0
+input 9953 0000 0 0 0 0 0 0
+capture 9980 high-06
+input 9990 0000 0 0 0 0 22000 0
+input 9998 0000 0 0 0 0 0 0
+capture 10025 high-07
+input 10035 0000 0 0 0 0 22000 0
+input 10043 0000 0 0 0 0 0 0
+capture 10070 high-08
+input 10080 0000 0 0 0 0 22000 0
+input 10088 0000 0 0 0 0 0 0
+capture 10115 high-09
+input 10125 0000 0 0 0 0 22000 0
+input 10133 0000 0 0 0 0 0 0
+capture 10160 high-10
+input 10170 0000 0 0 0 0 22000 0
+input 10178 0000 0 0 0 0 0 0
+capture 10205 high-11
+input 10215 0000 0 0 0 0 22000 0
+input 10223 0000 0 0 0 0 0 0
+capture 10250 high-12
+stop 10280

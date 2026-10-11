@@ -483,5 +483,75 @@ class PanelPreviewTests(unittest.TestCase):
         self.assertTrue((self.root / "previews/panels.png").is_file())
 
 
+class ProbeTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+        whole = {"outline": [[0, 0.5], [1, 0.5], [1, 1], [0, 1]], "frame": [[0, 0.5], [1, 0.5], [0, 1]]}
+        path = self.root / "DOD_Car_12.json"
+        path.write_text(json.dumps(table({"left": BADGE, "top": whole})), encoding="utf-8")
+        self.panels = paint.load_panels(path)
+        self.stock = bytes((*WHITE, 0)) * (64 * 64)
+
+    def test_each_panel_turns_opaque_in_its_own_colour(self):
+        out = paint.probe_image(self.stock, 64, 64, self.panels)
+        colour = paint.PANEL_COLOURS[1]              # "top", second by name
+        self.assertEqual(pixel(out, 28, 49, 64), (*colour, 255))
+        self.assertEqual(pixel(out, 31, 20, 64), (*WHITE, 0))      # outside every panel: stock
+
+    def quadrants(self, out):
+        """The colour at each quadrant patch's centre of "top" (64 x 32 texels from (0, 32))."""
+        return [pixel(out, x, y, 64)[:3] for x, y in ((16, 40), (48, 40), (16, 56), (48, 56))]
+
+    def test_quadrant_patches_name_their_frame_corner(self):
+        # Front-top white, rear-top black, front-bottom magenta, rear-bottom cyan.
+        out = paint.probe_image(self.stock, 64, 64, self.panels)
+        self.assertEqual(self.quadrants(out), [(255, 255, 255), (0, 0, 0), (240, 50, 230), (70, 240, 240)])
+
+    def test_a_mirrored_frame_shows_its_patches_mirrored(self):
+        path = self.root / "DOD_Car_12.json"
+        mirrored = {"outline": [[0, 0.5], [1, 0.5], [1, 1], [0, 1]], "frame": [[1, 0.5], [0, 0.5], [1, 1]]}
+        path.write_text(json.dumps(table({"top": mirrored})), encoding="utf-8")
+        out = paint.probe_image(self.stock, 64, 64, paint.load_panels(path))
+        self.assertEqual(self.quadrants(out), [(0, 0, 0), (255, 255, 255), (70, 240, 240), (240, 50, 230)])
+
+    def test_the_alpha0_panel_keeps_the_stock_alpha(self):
+        out = paint.probe_image(self.stock, 64, 64, self.panels, alpha0_panel="top")
+        self.assertEqual(pixel(out, 28, 49, 64), (*paint.PANEL_COLOURS[1], 0))
+        self.assertEqual(pixel(out, 5, 5, 64)[3], 255)
+
+    def test_an_unknown_alpha0_panel_is_refused(self):
+        with self.assertRaisesRegex(ValueError, "no panel roof"):
+            paint.probe_image(self.stock, 64, 64, self.panels, alpha0_panel="roof")
+
+    def test_the_probe_command_writes_a_private_asset_mod(self):
+        game = self.root / "game"
+        (game / "media/cars").mkdir(parents=True)
+        import zipfile
+        with zipfile.ZipFile(game / "media/cars/dod_car_12.zip", "w") as archive:   # disc archives vary in case
+            for name, data in stock_car(stripe=True).items():
+                archive.writestr(name, data)
+        tables = self.root / "tables"
+        tables.mkdir()
+        (tables / "DOD_Car_12.json").write_text(json.dumps(table({"top": SCRATCHED})), encoding="utf-8")
+        out = io.StringIO()
+        with redirect_stdout(out):
+            code = paint.main(["probe", "--state-root", str(self.root / "state"), "--game-root", str(game),
+                               "--stock-media", "DOD_Car_12", "--output", str(self.root / "probe"),
+                               "--panels", str(tables), "--extractor", str(self.root / "extractor.exe")])
+        self.assertEqual(code, 0)
+        mod = self.root / "probe/mods/livery-probe"
+        self.assertIn('name = "livery-probe"', (mod / "mod.toml").read_text(encoding="utf-8"))
+        members = mod / "members/media/cars/dod_car_12.zip"
+        # Turn 10's colour and stripe variants share the layout and get the probe too.
+        self.assertEqual(sorted(p.name for p in members.iterdir()),
+                         ["nodamage.xds", "nodamage_LOD0.xds", "nodamagestripe.xds"])
+        level0 = xds.decode_level((members / "nodamage.xds").read_bytes(), 0)
+        self.assertEqual(pixel(level0, 20, 22, 32)[3], 255)        # inside "top", now opaque
+        report = json.loads(out.getvalue())
+        self.assertEqual(report["legend"], {"top": "e6194b"})
+
+
 if __name__ == "__main__":
     unittest.main()
