@@ -159,6 +159,21 @@ are painted from the same normalised recipe, each against its own alpha, and
 repainted through `fh1_xds.repaint_xds`; they replace the clone's copies
 together once both are ready.
 
+A stock car's panel table is authored from local previews of its own textures:
+
+```powershell
+python tools\paint-fh1-livery.py panels --state-root .local\preview --game-root .local\game\eur-base `
+    --stock-media DOD_ChallengerSRT8392_12 --output .local\livery-panels\DOD_ChallengerSRT8392_12
+```
+
+It writes the paint area of both textures, the damage texture (whose scratches
+outline every body panel) with a 0.05 grid, and on the Challenger Turn 10's
+stripe lanes (each variant diffed against `nodamage`, inside the paint area);
+with a table it also draws each outline and frame (the thick line runs front to
+rear, the thin one top to bottom) and reports spec criterion 1: each outline's
+share inside the paint area of both textures, the share of scratches covered,
+and the share of stripe lanes on `top`, `front` and `rear`.
+
 ### Evidence
 
 | Date | Check | Result |

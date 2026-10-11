@@ -381,5 +381,98 @@ class PaintTests(unittest.TestCase):
         self.assertIn("no media/cars/DOD_Car_RSE_12", err.getvalue())
 
 
+def texture(size, texel):
+    """A DXT5 texture whose texel (x, y) is texel(x, y, size) -> RGBA."""
+    rgba = b"".join(bytes(texel(x, y, size)) for y in range(size) for x in range(size))
+    return xds.write_xds(xds_tests.header(size, size, xds_tests.DXT5, size.bit_length(), 0x4), rgba, size, size)
+
+
+def stock_car(stripe=True):
+    """Body textures of a stock car: an opaque badge in the top-left 1/4 x 1/4, the rest paint area;
+    damage scratches over 0.5..0.75 x 0.5..0.75; a stripe variant with a lane across that square."""
+    badge = lambda x, y, s: (90, 90, 90, 255) if x < s // 4 and y < s // 4 else (255, 255, 255, 0)
+    files = {"nodamage.xds": texture(32, badge), "nodamage_LOD0.xds": texture(64, badge),
+             "damage.xds": texture(32, lambda x, y, s: (128, 128, 128, 255 if 16 <= x < 24 and 16 <= y < 24 else 0)),
+             "lights.xds": b"not a body texture"}
+    if stripe:
+        files["nodamagestripe.xds"] = texture(32, lambda x, y, s: (255, 0, 0, 0) if 16 <= x < 24 and 20 <= y < 22
+                                              else badge(x, y, s))
+    return files
+
+
+SCRATCHED = {"outline": [[0.5, 0.5], [0.75, 0.5], [0.75, 0.75], [0.5, 0.75]],
+             "frame": [[0.5, 0.5], [0.75, 0.5], [0.5, 0.75]]}
+BADGE = {"outline": [[0, 0], [0.25, 0], [0.25, 0.25], [0, 0.25]], "frame": [[0, 0], [0.25, 0], [0, 0.25]]}
+
+
+class PanelPreviewTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+
+    def panels(self, entries):
+        path = self.root / "DOD_Car_12.json"
+        path.write_text(json.dumps(table(entries)), encoding="utf-8")
+        return paint.load_panels(path)
+
+    def test_previews_show_the_paint_area_damage_and_stripe_lanes(self):
+        report = paint.panel_previews(stock_car(), None, self.root / "out")
+        self.assertEqual(sorted(report["files"]),
+                         ["damage-grid.png", "paint-area-LOD0.png", "paint-area.png", "stripe-lanes.png"])
+        width, _, area = xds.decode_png((self.root / "out/paint-area.png").read_bytes())
+        self.assertEqual((width, pixel(area, 2, 2, 32)[:3], pixel(area, 20, 20, 32)[:3]), (32, (0, 0, 0), WHITE))
+        self.assertEqual(xds.decode_png((self.root / "out/paint-area-LOD0.png").read_bytes())[0], 64)
+        _, _, lanes = xds.decode_png((self.root / "out/stripe-lanes.png").read_bytes())
+        self.assertEqual({(x, y) for y in range(32) for x in range(32) if pixel(lanes, x, y, 32)[0] > 128},
+                         {(x, y) for x in range(16, 24) for y in range(20, 22)})
+        self.assertIsNone(report["coverage"])
+
+    def test_a_table_that_covers_the_body_meets_every_check(self):
+        report = paint.panel_previews(stock_car(), self.panels({"top": SCRATCHED}), self.root / "out")
+        self.assertIn("panels.png", report["files"])
+        coverage = report["coverage"]
+        self.assertEqual(coverage["panels"]["top"]["in_paint_area"], {"nodamage.xds": 1.0, "nodamage_LOD0.xds": 1.0})
+        self.assertEqual((coverage["scratches_covered"], coverage["stripe_lanes_covered"]), (1.0, 1.0))
+        self.assertEqual(coverage["checks"], {"outlines_in_paint_area": True, "scratches_covered": True,
+                                              "stripe_lanes_covered": True})
+
+    def test_a_table_off_the_body_fails_its_checks(self):
+        coverage = paint.panel_previews(stock_car(), self.panels({"left": BADGE}), self.root / "out")["coverage"]
+        self.assertEqual(coverage["panels"]["left"]["in_paint_area"], {"nodamage.xds": 0.0, "nodamage_LOD0.xds": 0.0})
+        self.assertEqual(coverage["scratches_covered"], 0.0)
+        self.assertEqual(coverage["checks"], {"outlines_in_paint_area": False, "scratches_covered": False,
+                                              "stripe_lanes_covered": False})
+
+    def test_stripe_lanes_count_only_on_the_top_front_and_rear(self):
+        coverage = paint.panel_previews(stock_car(), self.panels({"left": SCRATCHED}), self.root / "out")["coverage"]
+        self.assertEqual((coverage["scratches_covered"], coverage["stripe_lanes_covered"]), (1.0, 0.0))
+
+    def test_a_car_without_variants_has_no_stripe_lanes(self):
+        report = paint.panel_previews(stock_car(stripe=False), self.panels({"top": SCRATCHED}), self.root / "out")
+        self.assertNotIn("stripe-lanes.png", report["files"])
+        self.assertIsNone(report["coverage"]["stripe_lanes_covered"])
+        self.assertIsNone(report["coverage"]["checks"]["stripe_lanes_covered"])
+
+    def test_the_panels_command_reads_the_stock_car_from_the_disc(self):
+        game = self.root / "game"
+        (game / "media/cars").mkdir(parents=True)
+        import zipfile
+        with zipfile.ZipFile(game / "media/cars/DOD_Car_12.zip", "w") as archive:
+            for name, data in stock_car().items():
+                archive.writestr(name, data)
+        tables = self.root / "tables"
+        tables.mkdir()
+        (tables / "DOD_Car_12.json").write_text(json.dumps(table({"top": SCRATCHED})), encoding="utf-8")
+        out = io.StringIO()
+        with redirect_stdout(out):
+            code = paint.main(["panels", "--state-root", str(self.root / "state"), "--game-root", str(game),
+                               "--stock-media", "DOD_Car_12", "--output", str(self.root / "previews"),
+                               "--panels", str(tables), "--extractor", str(self.root / "extractor.exe")])
+        self.assertEqual(code, 0)
+        self.assertTrue(json.loads(out.getvalue())["coverage"]["checks"]["scratches_covered"])
+        self.assertTrue((self.root / "previews/panels.png").is_file())
+
+
 if __name__ == "__main__":
     unittest.main()

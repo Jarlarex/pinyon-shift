@@ -482,6 +482,114 @@ def paint_livery(recipe: Recipe, clone_dir: Path, preview: Path | None = None) -
             "textures": textures, "seconds": round(time.perf_counter() - started, 1)}
 
 
+# -- panel previews ---------------------------------------------------------
+
+VARIANT = re.compile(r"nodamage.+\.xds", re.IGNORECASE)    # Turn 10's stripe and colour variants
+LANE_PANELS = ("top", "front", "rear")                     # where Turn 10's stripe lanes run
+PANEL_COLOURS = [(230, 25, 75), (60, 180, 75), (255, 225, 25), (0, 130, 200), (245, 130, 48), (145, 30, 180),
+                 (70, 240, 240), (240, 50, 230), (210, 245, 60), (250, 190, 212)]
+
+
+def _line(rgba: bytearray, width: int, height: int, start, end, colour, thick: int = 1) -> None:
+    """A straight line between texel positions, `thick` texels wide."""
+    (x0, y0), (x1, y1) = start, end
+    steps = max(1, int(max(abs(x1 - x0), abs(y1 - y0))))
+    for step in range(steps + 1):
+        x, y = x0 + (x1 - x0) * step / steps, y0 + (y1 - y0) * step / steps
+        for dy in range(thick):
+            for dx in range(thick):
+                tx, ty = int(x) + dx - thick // 2, int(y) + dy - thick // 2
+                if 0 <= tx < width and 0 <= ty < height:
+                    rgba[4 * (ty * width + tx):4 * (ty * width + tx) + 4] = bytes((*colour, 255))
+
+
+def _mask_png(mask: bytes, width: int, height: int, on=(255, 255, 255), off=(0, 0, 0)) -> bytes:
+    lit, dark = bytes((*on, 255)), bytes((*off, 255))
+    return xds.encode_png(width, height, b"".join(lit if value else dark for value in mask))
+
+
+def panel_previews(files: dict[str, bytes], panels: dict[str, Panel] | None, output: Path) -> dict:
+    """Local previews for authoring a stock car's panel table, from the car's own textures: the paint
+    area of both body textures, the damage texture (whose scratches outline the body panels) with a
+    0.05 grid, Turn 10's stripe lanes (each stock variant diffed against nodamage), and, given a
+    table, its outlines and frames with the coverage numbers of spec criterion 1."""
+    textures = {name.lower(): data for name, data in files.items() if "/" not in name}
+    for name in ("nodamage.xds", "nodamage_lod0.xds", "damage.xds"):
+        if name not in textures:
+            raise ValueError(f"the stock car has no {name}")
+    base, lod0, damage = (xds.decode_level(textures[name], 0) for name in ("nodamage.xds", "nodamage_lod0.xds",
+                                                                          "damage.xds"))
+    width, wide = xds.layout(textures["nodamage.xds"]).width, xds.layout(textures["nodamage_lod0.xds"]).width
+    if xds.layout(textures["damage.xds"]).width != width:
+        raise ValueError("damage.xds and nodamage.xds differ in size")
+    paint_area, paint_lod0 = base[3::4].translate(_PAINT_AREA), lod0[3::4].translate(_PAINT_AREA)
+    scratches = _and(damage[3::4].translate(bytes(1 if a > 16 else 0 for a in range(256))), paint_area)
+    lanes = None
+    for name, data in sorted(textures.items()):
+        if VARIANT.fullmatch(name) and not name.endswith("_lod0.xds") and xds.layout(data).width == width:
+            variant = xds.decode_level(data, 0)
+            found = bytes(1 if max(abs(variant[4 * i + c] - base[4 * i + c]) for c in range(4)) > 24 else 0
+                          for i in range(width * width))
+            lanes = found if lanes is None else _or(lanes, found)
+    if lanes is not None:
+        lanes = _and(lanes, paint_area)    # decals and interior parts the variants re-encode are not lanes
+
+    output = Path(output)
+    output.mkdir(parents=True, exist_ok=True)
+    written = {"paint-area.png": _mask_png(paint_area, width, width),
+               "paint-area-LOD0.png": _mask_png(paint_lod0, wide, wide)}
+    grid = bytearray(damage)
+    for i in range(width * width):
+        if not paint_area[i]:
+            grid[4 * i:4 * i + 3] = bytes(c * 35 // 100 for c in damage[4 * i:4 * i + 3])
+        grid[4 * i + 3] = 255
+    for step in range(1, 20):
+        at = step * width / 20
+        colour, thick = ((255, 0, 255), 2) if step % 5 == 0 else ((0, 200, 255), 1)
+        _line(grid, width, width, (at, 0), (at, width - 1), colour, thick)
+        _line(grid, width, width, (0, at), (width - 1, at), colour, thick)
+    written["damage-grid.png"] = xds.encode_png(width, width, bytes(grid))
+    if lanes is not None:
+        written["stripe-lanes.png"] = _mask_png(lanes, width, width, on=(255, 60, 60))
+
+    coverage = None
+    if panels:
+        drawn = bytearray(grid)
+        union, lane_union, report = bytes(width * width), bytes(width * width), {}
+        for index, (name, panel) in enumerate(sorted(panels.items())):
+            mask, mask_lod0 = bytes(polygon_mask(panel.outline, width, width)), bytes(polygon_mask(panel.outline, wide, wide))
+            texels = mask.count(1)
+            report[name] = {"texels": texels, "in_paint_area": {
+                "nodamage.xds": round(_and(mask, paint_area).count(1) / texels, 4) if texels else 0.0,
+                "nodamage_LOD0.xds": round(_and(mask_lod0, paint_lod0).count(1) / max(1, mask_lod0.count(1)), 4)}}
+            union = _or(union, mask)
+            if name in LANE_PANELS:
+                lane_union = _or(lane_union, mask)
+            colour = PANEL_COLOURS[index % len(PANEL_COLOURS)]
+            points = [(x * width, y * width) for x, y in panel.outline]
+            for a, b in zip(points, points[1:] + points[:1]):
+                _line(drawn, width, width, a, b, colour, 2)
+            corner, rear, bottom = (tuple(c * width for c in panel.frame.to_texture(u, v))
+                                    for u, v in ((0, 0), (1, 0), (0, 1)))
+            _line(drawn, width, width, corner, rear, colour, 3)          # front -> rear
+            _line(drawn, width, width, corner, bottom, colour, 1)        # top -> bottom
+            for u, v in ((0.95, -0.05), (0.95, 0.05)):                   # arrowhead at the rear
+                _line(drawn, width, width, rear, tuple(c * width for c in panel.frame.to_texture(u, v)), colour, 2)
+        written["panels.png"] = xds.encode_png(width, width, bytes(drawn))
+        scratch_total, lane_total = scratches.count(1), lanes.count(1) if lanes is not None else 0
+        scratch_share = round(_and(union, scratches).count(1) / scratch_total, 4) if scratch_total else None
+        lane_share = round(_and(lane_union, lanes).count(1) / lane_total, 4) if lanes is not None and lane_total else None
+        coverage = {"panels": report, "scratches_covered": scratch_share, "stripe_lanes_covered": lane_share,
+                    "checks": {"outlines_in_paint_area": all(v >= 0.99 for entry in report.values()
+                                                             for v in entry["in_paint_area"].values()),
+                               "scratches_covered": scratch_share is not None and scratch_share >= 0.9,
+                               "stripe_lanes_covered": None if lane_share is None else lane_share >= 1.0}}
+    for name, data in written.items():
+        (output / name).write_bytes(data)
+    return {"output": str(output), "files": sorted(written), "sizes": {"nodamage.xds": width, "nodamage_LOD0.xds": wide},
+            "coverage": coverage}
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     commands = parser.add_subparsers(dest="command", required=True)
@@ -490,18 +598,41 @@ def main(argv: list[str] | None = None) -> int:
     paint.add_argument("--clone", type=Path, required=True, help="the clone-fh1-car.py output folder")
     paint.add_argument("--art", type=Path, help="the art folder (default: .local/livery-art/<recipe name>)")
     paint.add_argument("--preview", type=Path, help="write flat PNGs of the painted textures here")
-    for command in (paint,):
+    panels = commands.add_parser("panels", help="previews and coverage for a stock car's panel table")
+    panels.add_argument("--state-root", type=Path, required=True, help="the installed preview state (.local/preview)")
+    panels.add_argument("--game-root", type=Path, required=True, help="the extracted disc (.local/game/eur-base)")
+    panels.add_argument("--stock-media", required=True)
+    panels.add_argument("--output", type=Path, required=True, help="a local folder for the previews")
+    panels.add_argument("--extractor", type=Path, help="archive extractor (default: the one the build made)")
+    for command in (paint, panels):
         command.add_argument("--panels", type=Path, default=PANEL_TABLES, help=argparse.SUPPRESS)
         command.add_argument("--ids", type=Path, default=ID_TABLE, help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
     try:
-        recipe = load_recipe(args.recipe, art_dir=args.art, panel_tables=args.panels, id_table=args.ids)
-        report = paint_livery(recipe, args.clone, preview=args.preview)
+        if args.command == "paint":
+            recipe = load_recipe(args.recipe, art_dir=args.art, panel_tables=args.panels, id_table=args.ids)
+            report = paint_livery(recipe, args.clone, preview=args.preview)
+        else:
+            report = {"stock_media": args.stock_media} | panel_previews(
+                _stock_files(args, args.stock_media), _table_or_none(args.panels, args.stock_media), args.output)
     except (OSError, ValueError) as error:
         print(str(error), file=sys.stderr)
         return 1
     print(json.dumps(report, indent=2))
     return 0
+
+
+def _stock_files(args, media: str) -> dict[str, bytes]:
+    """A stock car's archive members, read only, through car-clone's sources."""
+    extractor = args.extractor or _load_tool("manage-fh1-dlc").default_extractor()
+    sources = _load_tool("clone-fh1-car").Sources(args.state_root.absolute(), args.game_root.absolute(),
+                                                  extractor.resolve())   # CreateProcess needs an absolute path
+    return sources.car_files(media)
+
+
+def _table_or_none(folder: Path, media: str) -> dict[str, Panel] | None:
+    path = Path(folder) / f"{media}.json"
+    return load_panels(path) if path.is_file() else None
 
 
 if __name__ == "__main__":
