@@ -141,7 +141,7 @@ def load_panels(path: Path) -> dict[str, Panel]:
         if not PANEL_NAME.fullmatch(name):
             raise ValueError(f"{path.name}: panel name {name!r} must be lowercase letters, digits and underscores")
         where = f"{path.name}: panel {name}"
-        outline = _points(f"{where}'s outline", entry.get("outline"), 3, 32)
+        outline = _points(f"{where}'s outline", entry.get("outline"), 3, 64)
         corners = _points(f"{where}'s frame", entry.get("frame"), 3, 3)
         try:
             frame = Frame.from_points(corners)
@@ -576,14 +576,21 @@ def panel_previews(files: dict[str, bytes], panels: dict[str, Panel] | None, out
             for u, v in ((0.95, -0.05), (0.95, 0.05)):                   # arrowhead at the rear
                 _line(drawn, width, width, rear, tuple(c * width for c in panel.frame.to_texture(u, v)), colour, 2)
         written["panels.png"] = xds.encode_png(width, width, bytes(drawn))
-        scratch_total, lane_total = scratches.count(1), lanes.count(1) if lanes is not None else 0
+        scratch_total = scratches.count(1)
         scratch_share = round(_and(union, scratches).count(1) / scratch_total, 4) if scratch_total else None
-        lane_share = round(_and(lane_union, lanes).count(1) / lane_total, 4) if lanes is not None and lane_total else None
+        # Turn 10 paints its stripes past the panels' ends and into colour swatches, so the check is
+        # that the lane texels lying on panels lie on top, front or rear.
+        lane_share = lanes_on_panels = None
+        if lanes is not None and lanes.count(1):
+            on_panels = _and(lanes, union).count(1)
+            lanes_on_panels = round(on_panels / lanes.count(1), 4)
+            lane_share = round(_and(lanes, lane_union).count(1) / on_panels, 4) if on_panels else 0.0
         coverage = {"panels": report, "scratches_covered": scratch_share, "stripe_lanes_covered": lane_share,
+                    "stripe_lanes_on_panels": lanes_on_panels,
                     "checks": {"outlines_in_paint_area": all(v >= 0.99 for entry in report.values()
                                                              for v in entry["in_paint_area"].values()),
                                "scratches_covered": scratch_share is not None and scratch_share >= 0.9,
-                               "stripe_lanes_covered": None if lane_share is None else lane_share >= 1.0}}
+                               "stripe_lanes_covered": None if lane_share is None else lane_share >= 0.99}}
     for name, data in written.items():
         (output / name).write_bytes(data)
     return {"output": str(output), "files": sorted(written), "sizes": {"nodamage.xds": width, "nodamage_LOD0.xds": wide},

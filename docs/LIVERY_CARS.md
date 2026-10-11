@@ -172,10 +172,23 @@ stripe lanes (each variant diffed against `nodamage`, inside the paint area);
 with a table it also draws each outline and frame (the thick line runs front to
 rear, the thin one top to bottom) and reports spec criterion 1: each outline's
 share inside the paint area of both textures, the share of scratches covered,
-and the share of stripe lanes on `top`, `front` and `rear`.
+and, of the stripe-lane texels that lie on panels, the share on `top`, `front`
+and `rear` (Turn 10 paints its stripes past the panels' ends and into colour
+swatches, so lanes off every panel are reported but not held against a table).
+
+The six stock cars' tables (`config/livery-cars/panels/`) were traced from those
+previews: a rough box per panel, the silhouette its scratches draw inside it
+(closed over scratch gaps, window cut-outs kept as holes joined by bridges),
+simplified to at most 64 points; the RUF's top, whose scratches are too sparse,
+was outlined by hand around its two opaque openings. Each car has `left`,
+`right`, `top`, `front` and `rear`, except the Murciélago, whose nose is part of
+its top panel. Which texture side panel is the car's left, which fascia is the
+front, and each frame's direction are read from the layout (wheel arches, fuel
+door, hood, roof rails) and checked in game with the probe.
 
 ### Evidence
 
 | Date | Check | Result |
 |---|---|---|
 | 2026-10-11 | `paint` with a six-layer test recipe (base fill, two bands on the top, synthetic disc art on both sides and the hood) into two copies of the scratch 3001 clone, with rough panel rectangles | **80–85 s** for both textures (18 s at 1024², 61–65 s at 2048²; spec: 3 min); the two runs **byte-identical**; alpha **identical at every level** and every block's alpha half kept. Every re-encoded block holds a painted texel; opaque texels sharing such a block with the paint area move by DXT re-encoding only (1.7–2.9% of them, mean 3–7/255, 95th percentile 9–21, at most 148 at a few badge edges) |
+| 2026-10-11 | `panels` coverage of the six committed tables (spec criterion 1) | outlines inside the paint area of both textures: **99.03–100%** (worst: the Lancer's left side); scratches covered: **92.4–98.5%**; Challenger stripe lanes on panels: **100% on `top`, `front`, `rear`** (80% of all lane texels lie on panels; the rest are Turn 10's bleed past the panel ends and two colour swatches) |

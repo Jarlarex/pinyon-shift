@@ -106,7 +106,7 @@ class PanelTableTests(unittest.TestCase):
             "schema_version": {"schema_version": 2, "stock_media": "DOD_Car_12", "panels": {"left": SQUARE}},
             "no panels": table({}),
             "panel name": table({"Left Side": SQUARE}),
-            "3 to 32 points": table({"left": {**SQUARE, "outline": [[0, 0], [1, 1]]}}),
+            "3 to 64 points": table({"left": {**SQUARE, "outline": [[0, 0], [1, 1]]}}),
             "between 0 and 1": table({"left": {**SQUARE, "outline": [[0, 0], [1.5, 0], [1, 1]]}}),
             "frame": table({"left": {**SQUARE, "frame": [[0, 0], [1, 1]]}}),
             "line": table({"left": {**SQUARE, "frame": [[0.1, 0.1], [0.5, 0.5], [0.9, 0.9]]}}),
@@ -447,6 +447,15 @@ class PanelPreviewTests(unittest.TestCase):
     def test_stripe_lanes_count_only_on_the_top_front_and_rear(self):
         coverage = paint.panel_previews(stock_car(), self.panels({"left": SCRATCHED}), self.root / "out")["coverage"]
         self.assertEqual((coverage["scratches_covered"], coverage["stripe_lanes_covered"]), (1.0, 0.0))
+
+    def test_stripes_painted_past_a_panels_end_do_not_count_against_it(self):
+        # Turn 10 runs the Challenger's stripes past the top panel into unused texture space.
+        files = stock_car()
+        files["nodamagestripe.xds"] = texture(32, lambda x, y, s: (255, 0, 0, 0) if 16 <= x < 32 and 20 <= y < 22
+                                              else (90, 90, 90, 255) if x < 8 and y < 8 else (255, 255, 255, 0))
+        coverage = paint.panel_previews(files, self.panels({"top": SCRATCHED}), self.root / "out")["coverage"]
+        self.assertEqual((coverage["stripe_lanes_covered"], coverage["stripe_lanes_on_panels"]), (1.0, 0.5))
+        self.assertTrue(coverage["checks"]["stripe_lanes_covered"])
 
     def test_a_car_without_variants_has_no_stripe_lanes(self):
         report = paint.panel_previews(stock_car(stripe=False), self.panels({"top": SCRATCHED}), self.root / "out")
