@@ -334,14 +334,18 @@ def _sample(width: int, height: int, rgba: bytes, x: float, y: float) -> tuple[f
 
 def _image(out: bytearray, mask: bytes, width: int, height: int, layer: dict, panel: Panel,
            art: tuple[int, int, bytes]) -> None:
-    """An art layer placed in panel space (texels along the panel's length and height), turned by
-    `rotate` degrees clockwise with u to the right and v down, mirrored first if asked."""
+    """An art layer placed in panel space (texels along the panel's length and height) so that it
+    reads as drawn when seen from outside the car: on a panel whose frame is mirrored as seen from
+    outside (the right side, the top and the front, where u runs right to left) the art is flipped
+    and `rotate` (degrees clockwise as seen from outside) turns the other way in panel space.
+    `mirror` flips the art as seen from outside."""
     art_width, art_height, pixels = art
     length, tall = panel.frame.size(width, height)
     image_width = layer["width"] * length
     image_height = layer["height"] * tall if layer["height"] is not None else image_width * art_height / art_width
     centre = (layer["at"][0] * length, layer["at"][1] * tall)
-    angle = math.radians(layer["rotate"])
+    flip = layer["mirror"] != panel.frame.mirrored
+    angle = math.radians(-layer["rotate"] if panel.frame.mirrored else layer["rotate"])
     cos, sin = math.cos(angle), math.sin(angle)
     corners = []
     for sx, sy in ((-0.5, -0.5), (0.5, -0.5), (0.5, 0.5), (-0.5, 0.5)):
@@ -364,7 +368,7 @@ def _image(out: bytearray, mask: bytes, width: int, height: int, layer: dict, pa
             t = (cos * dy - sin * dx) / image_height + 0.5
             if not (0 <= s < 1 and 0 <= t < 1):
                 continue
-            red, green, blue, alpha = _sample(art_width, art_height, pixels, 1 - s if layer["mirror"] else s, t)
+            red, green, blue, alpha = _sample(art_width, art_height, pixels, 1 - s if flip else s, t)
             a = alpha / 255 * opacity
             if a <= 0:
                 continue

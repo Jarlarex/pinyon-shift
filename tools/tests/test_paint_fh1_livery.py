@@ -88,6 +88,20 @@ class MaskTests(unittest.TestCase):
         self.assertEqual(texels, {(x, y) for y in range(4) for x in range(4) if (x + 0.5) + (y + 0.5) < 4})
 
 
+class CommittedPanelTableTests(unittest.TestCase):
+    def test_every_panel_is_laid_out_as_it_is_seen_from_outside(self):
+        # Seen from outside with u running front to rear (or, on the front and rear, from the car's
+        # left to its right), the left side and the rear read upright and the right side, the top and
+        # the front mirrored; the probe confirmed this in game on five of the six stock cars.
+        expected = {"left": False, "right": True, "top": True, "front": True, "rear": False}
+        tables = sorted(paint.PANEL_TABLES.glob("*.json"))
+        self.assertEqual(len(tables), 6)
+        for path in tables:
+            for name, panel in paint.load_panels(path).items():
+                with self.subTest(table=path.stem, panel=name):
+                    self.assertEqual(panel.frame.mirrored, expected[name])
+
+
 class PanelTableTests(unittest.TestCase):
     def load(self, data):
         with tempfile.TemporaryDirectory() as directory:
@@ -225,6 +239,16 @@ class CompositeTests(unittest.TestCase):
         out = paint.compose(bytes((*WHITE, 0)) * 1024, 32, 32, self.setup.recipe([layer]))
         # u runs right to left on this panel, so the front (red) half is on the texture's right.
         self.assertEqual((pixel(out, 29, 24, 32)[:3], pixel(out, 18, 24, 32)[:3]), ((255, 0, 0), (0, 0, 255)))
+
+    def test_art_on_a_mirrored_panel_still_reads_as_drawn(self):
+        # A panel laid out mirrored (u runs right to left on the texture, as the right side, top and
+        # front panels are): the art is flipped back, so its red left half is on the texture's left.
+        mirrored = {"left": {"outline": [[0, 0], [0.5, 0], [0.5, 0.5], [0, 0.5]], "frame": [[0.5, 0], [0, 0], [0.5, 0.5]]}}
+        (self.setup.panels / "DOD_Car_12.json").write_text(json.dumps(table(mirrored)), encoding="utf-8")
+        out = self.image()
+        self.assertEqual((pixel(out, 2, 8, 32)[:3], pixel(out, 13, 8, 32)[:3]), ((255, 0, 0), (0, 0, 255)))
+        flipped = self.image(mirror=True)
+        self.assertEqual((pixel(flipped, 2, 8, 32)[:3], pixel(flipped, 13, 8, 32)[:3]), ((0, 0, 255), (255, 0, 0)))
 
     def test_transparent_art_changes_nothing(self):
         (self.setup.art / "clear.png").write_bytes(xds.encode_png(2, 2, bytes(16)))

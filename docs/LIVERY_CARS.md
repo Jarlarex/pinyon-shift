@@ -182,13 +182,13 @@ previews: a rough box per panel, the silhouette its scratches draw inside it
 simplified to at most 64 points; the RUF's top, whose scratches are too sparse,
 was outlined by hand around its two opaque openings. Each car has `left`,
 `right`, `top`, `front` and `rear`, except the Murciélago, whose nose is part of
-its top panel. Which texture side panel is the car's left, which fascia is the
-front, and each frame's direction are read from the layout (wheel arches, fuel
-door, hood, roof rails) and checked in game with the probe livery, which paints
-a stock car's panels opaque, each in its own colour, with a large patch per
-quadrant: white at the front-top, black at the rear-top, magenta at the
-front-bottom and cyan at the rear-bottom (on the top panel "top" is the car's
-left; on the front and rear, u runs from the car's left to its right):
+its top panel (its `front` is the strip along the lower nose).
+
+The frames were checked in game with the probe livery, which paints a stock
+car's panels opaque, each in its own colour, with a large patch per quadrant:
+white at the front-top, black at the rear-top, magenta at the front-bottom and
+cyan at the rear-bottom (on the top panel "top" is the car's left; on the front
+and rear, u runs from the car's left to its right):
 
 ```powershell
 python tools\paint-fh1-livery.py probe --state-root .local\preview --game-root .local\game\eur-base `
@@ -199,7 +199,14 @@ python tools\run-fh1-render-test.py config\render-tests\fh1-livery-probe-frs.fh1
 
 The routes (`fh1-livery-probe-{challenger,frs,murcielago,lancer,ruf}`) fast
 travel to the Autoshow, open the stock car's showroom and orbit the camera
-round it.
+round it. The texture's upper side panel turned out to be the car's **right**,
+laid with the car's top towards the texture's bottom; the top panel's upper
+edge is the car's right; and every front fascia runs from the car's right to
+its left. The tables now give all six cars the same layout, which a unit test
+keeps: seen from outside, the left side and the rear are laid out upright and
+the right side, the top and the front mirrored. An `image` layer therefore
+flips itself on a mirrored panel, and `rotate` is clockwise as seen from
+outside, so art reads as drawn on every panel; `mirror` flips it on purpose.
 
 ### Evidence
 
@@ -207,4 +214,5 @@ round it.
 |---|---|---|
 | 2026-10-11 | `paint` with a six-layer test recipe (base fill, two bands on the top, synthetic disc art on both sides and the hood) into two copies of the scratch 3001 clone, with rough panel rectangles | **80–85 s** for both textures (18 s at 1024², 61–65 s at 2048²; spec: 3 min); the two runs **byte-identical**; alpha **identical at every level** and every block's alpha half kept. Every re-encoded block holds a painted texel; opaque texels sharing such a block with the paint area move by DXT re-encoding only (1.7–2.9% of them, mean 3–7/255, 95th percentile 9–21, at most 148 at a few badge edges) |
 | 2026-10-11 | `panels` coverage of the six committed tables (spec criterion 1) | outlines inside the paint area of both textures: **99.03–100%** (worst: the Lancer's left side); scratches covered: **92.4–98.5%**; Challenger stripe lanes on panels: **100% on `top`, `front`, `rear`** (80% of all lane texels lie on panels; the rest are Turn 10's bleed past the panel ends and two colour swatches) |
+| 2026-10-11 | Probe in game, Autoshow showroom, from a render seed of `.local/preview` (modded profile), for the Challenger, FR-S, Murciélago, Lancer and RUF; the Autoshow shows the Challenger in a stock stripe variant, so the probe paints every `nodamage*` variant | First pass (each panel's own colour) showed the side tables swapped and the upper side panel upside down; the quadrant patches then showed the top mirrored across the car's centreline and every front fascia mirrored. After the fixes all five read correctly from every side (confirmation pass: on each car the sides, hood, nose and tail show white at the front-top, black at the rear-top, magenta at the front-bottom and cyan at the rear-bottom as seen from outside; on the hood white is on the car's left, and on the nose and tail white is on the car's left). The Fiesta is a Unicorn car (`IsUnicorn = 1`) and is not in the Autoshow; a mod database patch does not reach the v4 database, so its table, laid out like the other five, is first seen in game by `livery-package` |
 | 2026-10-11 | Spec open question 1: one Challenger panel painted in the probe colour but with its stock alpha 0 (`--alpha0-panel rear`), on the stock car (`HasRaceLivery = 0`) | in game the panel shows the **stock paint (white)**, not the probe colour, and not a mix: on a car without `HasRaceLivery` the paint colour replaces the paint area's texture colour entirely. Only stock-opaque texels inside the outline showed the probe colour. A livery therefore needs `HasRaceLivery = 1`, which `car-clone` sets; how it shows on such a car is `livery-package`'s first in-game check |
