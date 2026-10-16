@@ -156,7 +156,7 @@ class RecipeSetup:
         # 2 x 1 art: red on the left, blue on the right.
         (self.art / "flag.png").write_bytes(xds.encode_png(2, 1, bytes((255, 0, 0, 255, 0, 0, 255, 255))))
 
-    def recipe(self, layers, thumbnail=None, **car):
+    def recipe(self, layers, thumbnail=None, require_art=True, **car):
         data = {"schema_version": 1,
                 "car": {"stock_id": 1557, "new_id": 3001, "stock_media": "DOD_Car_12",
                         "media_name": "DOD_Car_RSE_12", "display_name": "Rockstar", "price": None, **car},
@@ -165,7 +165,8 @@ class RecipeSetup:
             data["thumbnail"] = thumbnail
         path = self.root / "test-livery.json"
         path.write_text(json.dumps(data), encoding="utf-8")
-        return paint.load_recipe(path, art_dir=self.art, panel_tables=self.panels, id_table=self.ids)
+        return paint.load_recipe(path, art_dir=self.art, panel_tables=self.panels, id_table=self.ids,
+                                 require_art=require_art)
 
 
 def pixel(rgba, x, y, width=16):
@@ -310,6 +311,26 @@ class RecipeTests(unittest.TestCase):
                               ("../thumbnail.png", "plain file name"), (7, "plain file name")):
             with self.subTest(name=name), self.assertRaisesRegex(ValueError, message):
                 self.setup.recipe([], thumbnail=name)
+
+    def test_without_art_a_recipe_is_checked_but_its_art_is_not_read(self):
+        layers = [{"image": "logo.png", "panel": "left", "at": [0.5, 0.5], "width": 0.5}]
+        recipe = self.setup.recipe(layers, thumbnail="thumbnail.png", require_art=False)
+        self.assertEqual(recipe.art, {"logo.png": None})
+        self.assertEqual(recipe.layers[0]["file"], "logo.png")
+        with self.assertRaisesRegex(ValueError, "not found"):
+            self.setup.recipe(layers)
+        for bad, message in (([{"image": "../logo.png", "panel": "left", "at": [0.5, 0.5], "width": 0.5}], "plain file name"),
+                             ([{"image": "logo.png", "panel": "roof", "at": [0.5, 0.5], "width": 0.5}], "unknown panel")):
+            with self.subTest(message), self.assertRaisesRegex(ValueError, message):
+                self.setup.recipe(bad, require_art=False)
+        with self.assertRaisesRegex(ValueError, "plain file name"):
+            self.setup.recipe([], thumbnail="../thumbnail.png", require_art=False)
+
+    def test_a_recipe_checked_without_art_cannot_paint(self):
+        recipe = self.setup.recipe([{"image": "logo.png", "panel": "left", "at": [0.5, 0.5], "width": 0.5}],
+                                   require_art=False)
+        with self.assertRaisesRegex(ValueError, "without its art"):
+            paint.paint_livery(recipe, self.setup.root)
 
     def test_an_absolute_art_path_is_refused(self):
         layer = {"image": str(self.setup.art / "flag.png"), "panel": "left", "at": [0.5, 0.5], "width": 0.5}
@@ -589,6 +610,18 @@ class ProbeTests(unittest.TestCase):
         self.assertEqual(pixel(level0, 20, 22, 32)[3], 255)        # inside "top", now opaque
         report = json.loads(out.getvalue())
         self.assertEqual(report["legend"], {"top": "e6194b"})
+
+
+class CommittedRecipeTests(unittest.TestCase):
+    def test_every_committed_recipe_is_valid_without_its_art(self):
+        # The art stays on the player's machine, so CI checks everything else: car, IDs, panels, layers, names.
+        folder = Path(__file__).resolve().parents[2] / "config/livery-cars"
+        recipes = sorted(path for path in folder.glob("*.json") if path.name != "ids.json")
+        recipes += sorted((folder / "tests").glob("*.json"))
+        self.assertTrue(recipes)
+        for path in recipes:
+            with self.subTest(recipe=path.name):
+                paint.load_recipe(path, require_art=False)
 
 
 if __name__ == "__main__":

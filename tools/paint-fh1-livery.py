@@ -170,6 +170,7 @@ class Recipe:
     panels: dict[str, Panel]
     art: dict[str, tuple[int, int, bytes]]   # file name -> width, height, RGBA
     thumbnail: tuple[int, int, bytes] | None = None   # the Autoshow thumbnail art; None keeps the stock car's
+    with_art: bool = True     # False: checked without reading its art (art values are None); cannot paint
 
 
 def _colour(value, where: str) -> tuple[int, int, int]:
@@ -192,11 +193,13 @@ def _pair(value, where: str) -> tuple[float, float]:
     return _number(value[0], where, -1, 2), _number(value[1], where, -1, 2)
 
 
-def _art(name, where: str, art_dir: Path) -> tuple[int, int, bytes]:
-    """A named art file from the recipe's art folder, decoded."""
+def _art(name, where: str, art_dir: Path, read: bool = True) -> tuple[int, int, bytes] | None:
+    """A named art file from the recipe's art folder, decoded; only its name is checked when not `read`."""
     if not isinstance(name, str) or not ART_NAME.fullmatch(name):
         raise ValueError(f"{where}: art {name!r} must be a plain file name (letters, digits, '_', '-', '.') "
                          "ending in .png, inside the recipe's art folder")
+    if not read:
+        return None
     path = art_dir / name
     if not path.is_file():
         raise ValueError(f"{where}: art file {name} not found in {art_dir}")
@@ -206,7 +209,7 @@ def _art(name, where: str, art_dir: Path) -> tuple[int, int, bytes]:
         raise ValueError(f"{where}: {name} must be an 8-bit RGBA, non-interlaced PNG") from None
 
 
-def _layer(index: int, entry: dict, panels: dict[str, Panel], art_dir: Path, art: dict) -> dict:
+def _layer(index: int, entry: dict, panels: dict[str, Panel], art_dir: Path, art: dict, read: bool = True) -> dict:
     where = f"layer {index + 1}"
     kinds = [kind for kind in LAYER_KEYS if kind in entry] if isinstance(entry, dict) else []
     if len(kinds) != 1:
@@ -240,7 +243,7 @@ def _layer(index: int, entry: dict, panels: dict[str, Panel], art_dir: Path, art
     else:
         name = entry["image"]
         if name not in art:
-            art[name] = _art(name, where, art_dir)
+            art[name] = _art(name, where, art_dir, read)
         layer |= {"file": name, "panel": panel(entry.get("panel")), "at": _pair(entry.get("at"), f"{where}: at"),
                   "width": _number(entry.get("width"), f"{where}: width", 0, 4, low_inclusive=False),
                   "height": (_number(entry["height"], f"{where}: height", 0, 4, low_inclusive=False)
@@ -251,9 +254,11 @@ def _layer(index: int, entry: dict, panels: dict[str, Panel], art_dir: Path, art
 
 
 def load_recipe(path: Path, art_dir: Path | None = None, panel_tables: Path = PANEL_TABLES,
-                id_table: Path = ID_TABLE) -> Recipe:
+                id_table: Path = ID_TABLE, require_art: bool = True) -> Recipe:
     """A livery recipe, validated against the committed car ID table and the stock car's panel table;
-    its art (named, never embedded) comes from `art_dir`, by default .local/livery-art/<recipe name>/."""
+    its art (named, never embedded) comes from `art_dir`, by default .local/livery-art/<recipe name>/.
+    With `require_art` False everything but the art files is checked (for CI, where the art is
+    absent); such a recipe cannot be painted."""
     path = Path(path)
     data = json.loads(path.read_text(encoding="utf-8"))
     if data.get("schema_version") != 1:
@@ -286,13 +291,13 @@ def load_recipe(path: Path, art_dir: Path | None = None, panel_tables: Path = PA
     if not isinstance(layers, list):
         raise ValueError(f"{path.name}: layers must be a list")
     try:
-        layers = [_layer(index, entry, panels, art_dir, art) for index, entry in enumerate(layers)]
-        thumbnail = _art(data["thumbnail"], "thumbnail", art_dir) if "thumbnail" in data else None
+        layers = [_layer(index, entry, panels, art_dir, art, require_art) for index, entry in enumerate(layers)]
+        thumbnail = _art(data["thumbnail"], "thumbnail", art_dir, require_art) if "thumbnail" in data else None
     except ValueError as error:
         raise ValueError(f"{path.name}: {error}") from None
     if thumbnail is not None and thumbnail[:2] != THUMBNAIL_SIZE:
         raise ValueError(f"{path.name}: thumbnail must be %d x %d, the size of the Autoshow's" % THUMBNAIL_SIZE)
-    return Recipe(path.stem, dict(car), paint, layers, panels, art, thumbnail)
+    return Recipe(path.stem, dict(car), paint, layers, panels, art, thumbnail, require_art)
 
 
 # -- compositing ------------------------------------------------------------
@@ -449,6 +454,8 @@ def paint_livery(recipe: Recipe, clone_dir: Path, preview: Path | None = None) -
     nodamage_LOD0.xds are repainted through `fh1_xds.repaint_xds` (colour only, untouched blocks
     kept) and replaced together once both are ready, so a failure leaves the clone unchanged.
     `preview` receives flat PNGs of the painted textures. Returns the report."""
+    if not recipe.with_art:
+        raise ValueError(f"{recipe.name} was checked without its art; load it with its art folder to paint it")
     started = time.perf_counter()
     media = recipe.car["media_name"]
     cars = _find(Path(clone_dir) / "media", "cars")
