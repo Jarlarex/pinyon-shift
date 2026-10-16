@@ -1,0 +1,81 @@
+pinyon-shift-fh1-render-test-v1
+# livery-package check (SPEC-livery-package criterion 9), step 2 of 2, and a baseline: whether a save
+# still owns livery car 3001. The Autoshow marks an owned car's card with a garage icon (where an
+# unowned new car says NEW).
+# Seed: a state whose save spawns outside the Autoshow with car 3001's package enabled: the state
+# fh1-livery-car-buy left (the baseline), or the one fh1-livery-car-disable left after
+# `tools/manage-fh1-dlc.py enable --package-id 866DF020186B5FDBB13867532C57F2F35FD53D284D --state-root
+# <that state>`.
+# dlc-car-trace
+# dlc-car-ids 3001,1557
+# Route: X enters the Autoshow; right 14 times to Dodge, A; then right along the list to car 3001,
+# after the stock Challenger (cards 00-05).
+input 0 0000 0 0 0 0 0 0
+input 360 1000 0 0 0 0 0 0
+input 366 0000 0 0 0 0 0 0
+input 480 1000 0 0 0 0 0 0
+input 486 0000 0 0 0 0 0 0
+input 600 1000 0 0 0 0 0 0
+input 606 0000 0 0 0 0 0 0
+input 720 1000 0 0 0 0 0 0
+input 726 0000 0 0 0 0 0 0
+input 1000 1000 0 0 0 0 0 0
+input 1006 0000 0 0 0 0 0 0
+input 1150 1000 0 0 0 0 0 0
+input 1156 0000 0 0 0 0 0 0
+input 1300 1000 0 0 0 0 0 0
+input 1306 0000 0 0 0 0 0 0
+wait 1400 4000 freeroam
+capture 1700 free-roam
+capture 2350 spawn
+input 2400 4000 0 0 0 0 0 0
+input 2406 0000 0 0 0 0 0 0
+capture 2900 makes
+input 3000 0008 0 0 0 0 0 0
+input 3006 0000 0 0 0 0 0 0
+input 3030 0008 0 0 0 0 0 0
+input 3036 0000 0 0 0 0 0 0
+input 3060 0008 0 0 0 0 0 0
+input 3066 0000 0 0 0 0 0 0
+input 3090 0008 0 0 0 0 0 0
+input 3096 0000 0 0 0 0 0 0
+input 3120 0008 0 0 0 0 0 0
+input 3126 0000 0 0 0 0 0 0
+input 3150 0008 0 0 0 0 0 0
+input 3156 0000 0 0 0 0 0 0
+input 3180 0008 0 0 0 0 0 0
+input 3186 0000 0 0 0 0 0 0
+input 3210 0008 0 0 0 0 0 0
+input 3216 0000 0 0 0 0 0 0
+input 3240 0008 0 0 0 0 0 0
+input 3246 0000 0 0 0 0 0 0
+input 3270 0008 0 0 0 0 0 0
+input 3276 0000 0 0 0 0 0 0
+input 3300 0008 0 0 0 0 0 0
+input 3306 0000 0 0 0 0 0 0
+input 3330 0008 0 0 0 0 0 0
+input 3336 0000 0 0 0 0 0 0
+input 3360 0008 0 0 0 0 0 0
+input 3366 0000 0 0 0 0 0 0
+input 3390 0008 0 0 0 0 0 0
+input 3396 0000 0 0 0 0 0 0
+capture 3460 make
+input 3480 1000 0 0 0 0 0 0
+input 3486 0000 0 0 0 0 0 0
+capture 3940 card-00
+input 3960 0008 0 0 0 0 0 0
+input 3966 0000 0 0 0 0 0 0
+capture 4010 card-01
+input 4030 0008 0 0 0 0 0 0
+input 4036 0000 0 0 0 0 0 0
+capture 4080 card-02
+input 4100 0008 0 0 0 0 0 0
+input 4106 0000 0 0 0 0 0 0
+capture 4150 card-03
+input 4170 0008 0 0 0 0 0 0
+input 4176 0000 0 0 0 0 0 0
+capture 4220 card-04
+input 4240 0008 0 0 0 0 0 0
+input 4246 0000 0 0 0 0 0 0
+capture 4290 card-05
+stop 4330

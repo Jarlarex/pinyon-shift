@@ -1,0 +1,107 @@
+pinyon-shift-fh1-render-test-v1
+# livery-package check (SPEC-livery-package criterion 9), step 1 of 2: a save that owns livery car
+# 3001 is loaded with the car's package disabled, then saved.
+# Seed: a copy of the state fh1-livery-car-buy left (<output>.state: user, config, dlc and
+# title-update-v4), with `tools/manage-fh1-dlc.py disable --package-id
+# 866DF020186B5FDBB13867532C57F2F35FD53D284D --state-root <copy>`. The save's current car is 3001; the
+# title loads it and puts the player in another owned car outside the Autoshow.
+# The native DLC trace logs what the title has of car 3001 and the stock car:
+# dlc-car-trace
+# dlc-car-ids 3001,1557
+# Route: X enters the Autoshow; right 17 times to Ford, A; the first Ford (the 1956 F100, 26,000 Cr),
+# A: the showroom; A: BUY; A: buy with credits; the title saves (waits for the garage thumbnail it
+# renders, a .xdc in the profile); A at the "return to free roam" prompt (pressed three times; the later
+# presses are a brake tap). In free roam the throttle is held until the car has moved 15 m, then the
+# camera turns to each side. Step 2 is fh1-livery-car-owned from this run's state with the package
+# enabled again.
+input 0 0000 0 0 0 0 0 0
+input 360 1000 0 0 0 0 0 0
+input 366 0000 0 0 0 0 0 0
+input 480 1000 0 0 0 0 0 0
+input 486 0000 0 0 0 0 0 0
+input 600 1000 0 0 0 0 0 0
+input 606 0000 0 0 0 0 0 0
+input 720 1000 0 0 0 0 0 0
+input 726 0000 0 0 0 0 0 0
+input 1000 1000 0 0 0 0 0 0
+input 1006 0000 0 0 0 0 0 0
+input 1150 1000 0 0 0 0 0 0
+input 1156 0000 0 0 0 0 0 0
+input 1300 1000 0 0 0 0 0 0
+input 1306 0000 0 0 0 0 0 0
+wait 1400 4000 freeroam
+capture 1700 free-roam
+capture 2350 spawn
+input 2400 4000 0 0 0 0 0 0
+input 2406 0000 0 0 0 0 0 0
+capture 2900 makes
+input 3000 0008 0 0 0 0 0 0
+input 3006 0000 0 0 0 0 0 0
+input 3030 0008 0 0 0 0 0 0
+input 3036 0000 0 0 0 0 0 0
+input 3060 0008 0 0 0 0 0 0
+input 3066 0000 0 0 0 0 0 0
+input 3090 0008 0 0 0 0 0 0
+input 3096 0000 0 0 0 0 0 0
+input 3120 0008 0 0 0 0 0 0
+input 3126 0000 0 0 0 0 0 0
+input 3150 0008 0 0 0 0 0 0
+input 3156 0000 0 0 0 0 0 0
+input 3180 0008 0 0 0 0 0 0
+input 3186 0000 0 0 0 0 0 0
+input 3210 0008 0 0 0 0 0 0
+input 3216 0000 0 0 0 0 0 0
+input 3240 0008 0 0 0 0 0 0
+input 3246 0000 0 0 0 0 0 0
+input 3270 0008 0 0 0 0 0 0
+input 3276 0000 0 0 0 0 0 0
+input 3300 0008 0 0 0 0 0 0
+input 3306 0000 0 0 0 0 0 0
+input 3330 0008 0 0 0 0 0 0
+input 3336 0000 0 0 0 0 0 0
+input 3360 0008 0 0 0 0 0 0
+input 3366 0000 0 0 0 0 0 0
+input 3390 0008 0 0 0 0 0 0
+input 3396 0000 0 0 0 0 0 0
+input 3420 0008 0 0 0 0 0 0
+input 3426 0000 0 0 0 0 0 0
+input 3450 0008 0 0 0 0 0 0
+input 3456 0000 0 0 0 0 0 0
+input 3480 0008 0 0 0 0 0 0
+input 3486 0000 0 0 0 0 0 0
+capture 3550 make
+input 3570 1000 0 0 0 0 0 0
+input 3576 0000 0 0 0 0 0 0
+capture 4030 card
+input 4050 1000 0 0 0 0 0 0
+input 4056 0000 0 0 0 0 0 0
+capture 4310 showroom
+input 4330 1000 0 0 0 0 0 0
+input 4336 0000 0 0 0 0 0 0
+capture 4390 confirm
+input 4410 1000 0 0 0 0 0 0
+input 4416 0000 0 0 0 0 0 0
+capture 4460 saving
+wait 4470 3600 file .xdc
+capture 4710 return-prompt
+input 4730 1000 0 0 0 0 0 0
+input 4736 0000 0 0 0 0 0 0
+input 4850 1000 0 0 0 0 0 0
+input 4856 0000 0 0 0 0 0 0
+input 4970 1000 0 0 0 0 0 0
+input 4976 0000 0 0 0 0 0 0
+input 5110 0000 0 255 0 0 0 0
+wait 5120 3000 vehicle-moved 15
+capture 5130 drive-rear
+input 5140 0000 255 0 0 0 0 0
+input 5260 0000 0 0 0 0 0 0
+input 5310 0000 0 0 0 0 32767 0
+capture 5355 look-right
+input 5370 0000 0 0 0 0 0 0
+input 5400 0000 0 0 0 0 -32768 0
+capture 5445 look-left
+input 5460 0000 0 0 0 0 0 0
+input 5490 0000 0 0 0 0 0 32767
+capture 5535 look-back
+input 5550 0000 0 0 0 0 0 0
+stop 5610
