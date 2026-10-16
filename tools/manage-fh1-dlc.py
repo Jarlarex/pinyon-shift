@@ -344,7 +344,7 @@ def list_content(state: Path) -> list[dict]:
     return records
 
 
-def import_content(source: Path, state: Path, extractor: Path) -> list[dict]:
+def import_content(source: Path, state: Path, extractor: Path, *, refresh: bool = True) -> list[dict]:
     state = long_path(state)
     with mutation_lock(state), tempfile.TemporaryDirectory(prefix="staging-", dir=state / "dlc") as directory:
         staging = Path(directory)
@@ -437,10 +437,12 @@ def import_content(source: Path, state: Path, extractor: Path) -> list[dict]:
                     raise
             elif not (enabled.exists() or disabled.exists()):
                 content.rename(disabled)
+        if refresh:
+            _refresh_livery_strings(state, extractor)
     return list_content(state)
 
 
-def set_enabled(state: Path, id: str, enabled: bool) -> list[dict]:
+def set_enabled(state: Path, id: str, enabled: bool, *, refresh: bool = True) -> list[dict]:
     state = long_path(state)
     with mutation_lock(state):
         record_path = state / "dlc" / (id + ".json")
@@ -459,6 +461,9 @@ def set_enabled(state: Path, id: str, enabled: bool) -> list[dict]:
             raise ValueError("the imported content is missing")
         destination.parent.mkdir(parents=True, exist_ok=True)
         source.rename(destination)
+        if refresh:
+            # The enabled livery packages' names follow the installed set.
+            _refresh_livery_strings(state)
     return list_content(state)
 
 
@@ -496,7 +501,7 @@ def install_folder(source: Path, state: Path, extractor: Path) -> dict:
                 continue
             before = records()
             try:
-                import_content(path, state, extractor)
+                import_content(path, state, extractor, refresh=False)
             except LicenceOnlyInput as error:
                 if not retry:
                     waiting.append(path)
@@ -513,9 +518,10 @@ def install_folder(source: Path, state: Path, extractor: Path) -> dict:
         # A livery car the player turned off stays off; only owned DLC is enabled here.
         if not record.get("enabled") and record.get("kind") != GENERATED:
             try:
-                set_enabled(state, record["package_id"], True)
+                set_enabled(state, record["package_id"], True, refresh=False)
             except ValueError as error:
                 rows.append(dict(file=record["package_id"], status="not enabled", reason=str(error)))
+    refresh_livery_strings(state, extractor)
     return dict(files=rows, packages=list_content(state))
 
 
@@ -586,8 +592,9 @@ def install_livery(state: Path, game_root: Path, extractor: Path, recipe_path: P
             record = dict(package_id=id, display_name=report["header_name"], kind=GENERATED, generator="livery-package",
                           car_id=recipe.car["new_id"], stock_id=recipe.car["stock_id"], recipe=str(recipe_path),
                           recipe_sha256=_sha256(Path(recipe_path)), art_sha256={name: _sha256(art_dir / name) for name in art},
-                          string_keys=report["string_keys"], payload_sha256=digest, file_count=len(files),
-                          license_mask=LIVERY_MASK, header_sha256=hashlib.sha256(header_data).hexdigest().upper())
+                          game_root=str(Path(game_root).absolute()), string_keys=report["string_keys"],
+                          payload_sha256=digest, file_count=len(files), license_mask=LIVERY_MASK,
+                          header_sha256=hashlib.sha256(header_data).hexdigest().upper())
             staged_header = staging / "header"
             staged_header.write_bytes(header_data)
             header.parent.mkdir(parents=True, exist_ok=True)
@@ -607,12 +614,65 @@ def install_livery(state: Path, game_root: Path, extractor: Path, recipe_path: P
             else:
                 (staging / "content").rename(active)
         verified_content(state, id)
+        # The other enabled livery cars' tables now gain this car's names.
+        _refresh_livery_strings(state, extractor)
     return dict(livery=report, packages=list_content(state))
+
+
+def _refresh_livery_strings(state: Path, extractor: Path | None = None) -> dict:
+    """Rewrite the Data_Car tables of every enabled livery package from the installed set: each
+    language's winning Turn 10 table plus the names of every enabled livery car. The title uses
+    only the highest-priority copy, so each livery package carries the same complete tables and
+    any of them can win. Runs after every change to the installed set, under its lock. A livery
+    package that fails verification is skipped, never re-signed."""
+    state = long_path(state)
+    records = livery_records(state)
+    enabled = [record for record in records if package_paths(state, record["package_id"])[0].is_dir()]
+    result = dict(rewritten=[], skipped=[])
+    if not enabled:
+        return result
+    verified = []
+    for record in enabled:
+        active, _, header = package_paths(state, record["package_id"])
+        try:
+            verified_livery(active, header, record)
+            if not record.get("game_root"):
+                raise ValueError("its record names no disc; build the livery car again")
+            verified.append(record)
+        except (OSError, ValueError) as error:
+            result["skipped"].append(dict(package_id=record["package_id"], reason=str(error)))
+    if not verified:
+        return result
+    package, clone = _tool("package-fh1-livery"), _tool("clone-fh1-car")
+    sources = clone.Sources(state, Path(verified[0]["game_root"]), Path(extractor or default_extractor()).resolve())
+    tables = sources.string_tables("data_car.str", skip={record["package_id"] for record in records})
+    names = package.livery_tables(tables, [entry for record in enabled for entry in record.get("string_keys", [])])
+    for record in verified:
+        active = package_paths(state, record["package_id"])[0]
+        for name, data in package.string_files(names, record["car_id"]).items():
+            path = active / "Media" / "DLCZips" / name
+            if not path.is_file() or path.read_bytes() != data:
+                staged = path.with_name(path.name + ".refresh")
+                staged.write_bytes(data)
+                staged.replace(path)
+        files, digest = payload_catalog(active)
+        if digest != record["payload_sha256"]:
+            write_json(state / "dlc" / (record["package_id"] + ".json"),
+                       record | dict(payload_sha256=digest, file_count=len(files)))
+            result["rewritten"].append(record["package_id"])
+    return result
+
+
+def refresh_livery_strings(state: Path, extractor: Path | None = None) -> dict:
+    """_refresh_livery_strings on its own, under the installed set's lock (the game must be closed)."""
+    with mutation_lock(long_path(state)):
+        return _refresh_livery_strings(state, extractor)
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("list", "import", "install-folder", "enable", "disable", "install-livery"))
+    parser.add_argument("action", choices=("list", "import", "install-folder", "enable", "disable", "install-livery",
+                                           "refresh-livery-strings"))
     parser.add_argument("--state-root", type=Path, required=True)
     parser.add_argument("--source", type=Path)
     parser.add_argument("--package-id")
@@ -638,6 +698,10 @@ def main(argv: list[str] | None = None) -> int:
             # CreateProcess needs the extractor as an absolute Windows path.
             print(json.dumps(install_livery(state, args.game_root.resolve(), args.extractor.resolve(), args.recipe,
                                             args.art, panels=args.panels, ids=args.ids)))
+            return 0
+        if args.action == "refresh-livery-strings":
+            refreshed = refresh_livery_strings(state, args.extractor.resolve())
+            print(json.dumps(dict(refreshed=refreshed, packages=list_content(state))))
             return 0
         if args.action == "list":
             records = list_content(state)

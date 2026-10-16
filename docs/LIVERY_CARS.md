@@ -13,7 +13,7 @@ No game files, generated cars or livery art are committed; livery art lives in
 | `xds-codec` | `tools/fh1_xds.py` | done (layout, read/write, decode, encode, in-game check) |
 | `car-clone` | `tools/clone-fh1-car.py` | done (sources, rows, names, files, CLI; car IDs in `config/livery-cars/ids.json`) |
 | `livery-paint` | `tools/paint-fh1-livery.py` | built (repaint, panel tables for six cars, recipes, `paint`, `panels`, probe checked in game on five cars); the player check is open |
-| `livery-package` | `tools/package-fh1-livery.py`, `tools/manage-fh1-dlc.py` | in progress (package build; the title mounts it and lists the car) |
+| `livery-package` | `tools/package-fh1-livery.py`, `tools/manage-fh1-dlc.py` | in progress (package build, `install-livery`, names refresh; the title mounts the package and lists the car) |
 | `promo-cars` | — | planned |
 
 ## Car textures (`tools/fh1_xds.py`)
@@ -258,6 +258,28 @@ and adds what a DLC car needs:
 # A package tree and header for inspection (writes nothing in a state root)
 python tools\package-fh1-livery.py build --recipe config\livery-cars\tests\challenger-test.json `
     --state-root .local\preview --game-root .local\game\eur-base --output <dir>
+```
+
+`tools/manage-fh1-dlc.py install-livery` builds the package and installs it
+beside the owned DLC, enabled (the game must be closed). A car that is already
+installed is built again and replaced in place, keeping its enabled state; the
+old copy is kept under `dlc/replaced/`. Its import record has `kind:
+"generated"` and holds the recipe and art hashes, the string keys, the disc it
+was built from and the payload digest; it is verified against that record,
+since its payload depends on the player's disc and DLC, and its licence stays
+`00000001`. `list`, `enable` and `disable` treat it like owned DLC;
+`install-folder` never turns a disabled livery car back on.
+
+After every change to the installed set (`import`, `install-folder`,
+`enable`, `disable`, `install-livery`), the manager rewrites the Data_Car
+tables of every enabled livery package, so whichever of them wins the
+priority holds every name; a livery package that fails verification is
+skipped, never re-signed.
+
+```powershell
+python tools\manage-fh1-dlc.py install-livery --recipe config\livery-cars\<name>.json `
+    --state-root <state> --game-root .local\game\eur-base [--art .local\livery-art\<name>]
+python tools\manage-fh1-dlc.py refresh-livery-strings --state-root <state>   # also runs after every change
 ```
 
 `config/livery-cars/tests/` holds two recipes for the in-game checks, fills

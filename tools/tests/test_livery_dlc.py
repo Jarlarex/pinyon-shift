@@ -207,5 +207,106 @@ class LiveryInstallTests(unittest.TestCase):
         self.assertIn(self.id, [record["package_id"] for record in result["packages"]])
 
 
+class LiveryStringRefreshTests(unittest.TestCase):
+    """Every enabled livery package carries the same complete Data_Car tables, rebuilt after each change."""
+
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.setup = package_tests.PackageSetup(Path(self.temporary.name))
+        self.state = self.setup.files.state
+        self.setup.files.ids.write_text(json.dumps({"schema_version": 1, "cars": [
+            {"id": 3001, "stock_id": 1557, "car": "Rockstar"}, {"id": 3002, "stock_id": 1557, "car": "Meguiar's"}]}))
+        second = json.loads(self.setup.recipe_path.read_text())
+        second["car"] |= {"new_id": 3002, "media_name": "DOD_Car_MEG_12", "display_name": "Car Meguiar's"}
+        self.second = self.setup.root / "second-livery.json"
+        self.second.write_text(json.dumps(second))
+        self.first_id, self.second_id = package.package_id(3001), package.package_id(3002)
+        self.game = patch.object(dlc.subprocess, "check_output", return_value=NO_GAME)
+        self.game.start()
+        self.addCleanup(self.game.stop)
+
+    def install(self, recipe):
+        return dlc.install_livery(self.state, self.setup.files.game, Path("extractor.exe"), recipe,
+                                  self.setup.root / "art", panels=self.setup.panels, ids=self.setup.files.ids)
+
+    def names(self, package_id, car_id):
+        content = dlc.package_paths(self.state, package_id)[0]
+        tables = dict(package_tests.read_zip((content / f"Media/DLCZips/StringTables_pri_{car_id}.zip").read_bytes()))
+        return dict(strings.parse(tables["EN/Data_Car.str"]))
+
+    def both(self):
+        self.install(self.setup.recipe_path)
+        self.install(self.second)
+        return [{entry["key"] for entry in self.record(i)["string_keys"]} for i in (self.first_id, self.second_id)]
+
+    def record(self, package_id):
+        return json.loads((self.state / "dlc" / f"{package_id}.json").read_text(encoding="utf-8"))
+
+    def test_a_second_livery_car_is_named_in_the_first_cars_tables(self):
+        first, second = self.both()
+        self.assertFalse(first & second)
+        for package_id, car_id in ((self.first_id, 3001), (self.second_id, 3002)):
+            with self.subTest(car=car_id):
+                names = self.names(package_id, car_id)
+                self.assertTrue(first | second <= set(names))
+                self.assertIn("Car Meguiar's", names.values())
+                self.assertIn("Car Rockstar", names.values())
+                dlc.verified_content(self.state, package_id, require_enabled=True)
+
+    def test_disabling_a_livery_car_takes_its_names_out_and_enabling_puts_them_back(self):
+        _, second = self.both()
+        dlc.set_enabled(self.state, self.second_id, False)
+        self.assertFalse(second & set(self.names(self.first_id, 3001)))
+        dlc.verified_content(self.state, self.first_id, require_enabled=True)
+        dlc.set_enabled(self.state, self.second_id, True)
+        self.assertTrue(second <= set(self.names(self.first_id, 3001)))
+        self.assertTrue(second <= set(self.names(self.second_id, 3002)))
+
+    def newer_turn_10_table(self):
+        """An enabled package with a newer complete table than the Pizza Hut's 2950, as a later Turn 10 pack ships."""
+        folder = self.state / package_tests.clone_tests.TITLE / "00000002/NEWER/Media/DLCZips"
+        english = [(6002, "Taken"), (7500, "New DLC car"), (23100, "Challenger '12"), (24056, "Challenger")]
+        package_tests.clone_tests.write_zip(folder / "StringTables_pri_2960.zip",
+                                            {"EN/Data_Car.str": package_tests.clone_tests.string_table(english)})
+
+    def test_a_newer_turn_10_table_reaches_the_livery_tables(self):
+        self.both()
+        self.newer_turn_10_table()
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            code = dlc.main(["refresh-livery-strings", "--state-root", str(self.state), "--extractor", "extractor.exe"])
+        self.assertEqual(code, 0, err.getvalue())
+        self.assertEqual(sorted(json.loads(out.getvalue())["refreshed"]["rewritten"]), sorted([self.first_id, self.second_id]))
+        for package_id, car_id in ((self.first_id, 3001), (self.second_id, 3002)):
+            self.assertEqual(self.names(package_id, car_id)[7500], "New DLC car")
+            dlc.verified_content(self.state, package_id, require_enabled=True)
+
+    def test_a_damaged_livery_package_is_skipped_not_blessed(self):
+        self.both()
+        content = dlc.package_paths(self.state, self.second_id)[0]
+        (content / "Media/3002.puboffer").write_bytes(b"changed")
+        before = self.record(self.second_id)
+        self.newer_turn_10_table()
+        refreshed = dlc.refresh_livery_strings(self.state)
+        self.assertEqual(refreshed["rewritten"], [self.first_id])
+        self.assertEqual([entry["package_id"] for entry in refreshed["skipped"]], [self.second_id])
+        self.assertEqual(self.record(self.second_id), before)
+        with self.assertRaisesRegex(ValueError, "incomplete or changed"):
+            dlc.verified_content(self.state, self.second_id)
+
+    def test_imports_and_folder_installs_rebuild_the_tables(self):
+        self.install(self.setup.recipe_path)
+        calls = []
+        with patch.object(dlc, "_refresh_livery_strings", side_effect=lambda *a, **k: calls.append(a) or {}):
+            empty = self.setup.root / "no-dlc"
+            empty.mkdir()
+            dlc.install_folder(empty, self.state, Path("extractor.exe"))
+            self.assertEqual(len(calls), 1)
+            with patch.object(dlc, "stage_inputs", return_value=[]):
+                dlc.import_content(empty, self.state, Path("extractor.exe"))
+            self.assertEqual(len(calls), 2)
+
+
 if __name__ == "__main__":
     unittest.main()
