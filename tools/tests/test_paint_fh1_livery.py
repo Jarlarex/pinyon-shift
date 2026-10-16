@@ -156,11 +156,13 @@ class RecipeSetup:
         # 2 x 1 art: red on the left, blue on the right.
         (self.art / "flag.png").write_bytes(xds.encode_png(2, 1, bytes((255, 0, 0, 255, 0, 0, 255, 255))))
 
-    def recipe(self, layers, **car):
+    def recipe(self, layers, thumbnail=None, **car):
         data = {"schema_version": 1,
                 "car": {"stock_id": 1557, "new_id": 3001, "stock_media": "DOD_Car_12",
                         "media_name": "DOD_Car_RSE_12", "display_name": "Rockstar", "price": None, **car},
                 "paint": {"rgb": "111111"}, "layers": layers}
+        if thumbnail is not None:
+            data["thumbnail"] = thumbnail
         path = self.root / "test-livery.json"
         path.write_text(json.dumps(data), encoding="utf-8")
         return paint.load_recipe(path, art_dir=self.art, panel_tables=self.panels, id_table=self.ids)
@@ -296,6 +298,18 @@ class RecipeTests(unittest.TestCase):
         for message, (layers, car) in cases.items():
             with self.subTest(message), self.assertRaisesRegex(ValueError, message):
                 self.setup.recipe(layers, **car)
+
+    def test_a_recipe_may_name_its_autoshow_thumbnail(self):
+        (self.setup.art / "thumbnail.png").write_bytes(xds.encode_png(768, 288, bytes(768 * 288 * 4)))
+        self.assertEqual(self.setup.recipe([], thumbnail="thumbnail.png").thumbnail[:2], (768, 288))
+        self.assertIsNone(self.setup.recipe([]).thumbnail)
+
+    def test_a_thumbnail_of_another_size_or_place_is_refused(self):
+        (self.setup.art / "small.png").write_bytes(xds.encode_png(2, 1, bytes(8)))
+        for name, message in (("small.png", "768 x 288"), ("missing.png", "not found"),
+                              ("../thumbnail.png", "plain file name"), (7, "plain file name")):
+            with self.subTest(name=name), self.assertRaisesRegex(ValueError, message):
+                self.setup.recipe([], thumbnail=name)
 
     def test_an_absolute_art_path_is_refused(self):
         layer = {"image": str(self.setup.art / "flag.png"), "panel": "left", "at": [0.5, 0.5], "width": 0.5}

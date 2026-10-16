@@ -36,6 +36,7 @@ ART_ROOT = ROOT / ".local/livery-art"
 PANEL_NAME = re.compile(r"[a-z][a-z0-9_]*")
 MEDIA_NAME = re.compile(r"[A-Za-z0-9_]+")
 ART_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*\.png", re.IGNORECASE)
+THUMBNAIL_SIZE = (768, 288)   # Thumbnail_<id>.xds: a 608 x 288 three-quarter view beside a 160 x 288 rotated side view
 
 
 def _load_tool(name: str):
@@ -168,6 +169,7 @@ class Recipe:
     layers: list[dict]        # validated, with defaults filled in
     panels: dict[str, Panel]
     art: dict[str, tuple[int, int, bytes]]   # file name -> width, height, RGBA
+    thumbnail: tuple[int, int, bytes] | None = None   # the Autoshow thumbnail art; None keeps the stock car's
 
 
 def _colour(value, where: str) -> tuple[int, int, int]:
@@ -188,6 +190,20 @@ def _pair(value, where: str) -> tuple[float, float]:
     if not isinstance(value, list) or len(value) != 2:
         raise ValueError(f"{where} must be a pair [a, b]")
     return _number(value[0], where, -1, 2), _number(value[1], where, -1, 2)
+
+
+def _art(name, where: str, art_dir: Path) -> tuple[int, int, bytes]:
+    """A named art file from the recipe's art folder, decoded."""
+    if not isinstance(name, str) or not ART_NAME.fullmatch(name):
+        raise ValueError(f"{where}: art {name!r} must be a plain file name (letters, digits, '_', '-', '.') "
+                         "ending in .png, inside the recipe's art folder")
+    path = art_dir / name
+    if not path.is_file():
+        raise ValueError(f"{where}: art file {name} not found in {art_dir}")
+    try:
+        return xds.decode_png(path.read_bytes())
+    except ValueError:
+        raise ValueError(f"{where}: {name} must be an 8-bit RGBA, non-interlaced PNG") from None
 
 
 def _layer(index: int, entry: dict, panels: dict[str, Panel], art_dir: Path, art: dict) -> dict:
@@ -223,17 +239,8 @@ def _layer(index: int, entry: dict, panels: dict[str, Panel], art_dir: Path, art
                   "u": _pair(entry.get("u"), f"{where}: u"), "v": _pair(entry.get("v"), f"{where}: v")}
     else:
         name = entry["image"]
-        if not isinstance(name, str) or not ART_NAME.fullmatch(name):
-            raise ValueError(f"{where}: art {name!r} must be a plain file name (letters, digits, '_', '-', '.') "
-                             "ending in .png, inside the recipe's art folder")
         if name not in art:
-            path = art_dir / name
-            if not path.is_file():
-                raise ValueError(f"{where}: art file {name} not found in {art_dir}")
-            try:
-                art[name] = xds.decode_png(path.read_bytes())
-            except ValueError:
-                raise ValueError(f"{where}: {name} must be an 8-bit RGBA, non-interlaced PNG") from None
+            art[name] = _art(name, where, art_dir)
         layer |= {"file": name, "panel": panel(entry.get("panel")), "at": _pair(entry.get("at"), f"{where}: at"),
                   "width": _number(entry.get("width"), f"{where}: width", 0, 4, low_inclusive=False),
                   "height": (_number(entry["height"], f"{where}: height", 0, 4, low_inclusive=False)
@@ -280,9 +287,12 @@ def load_recipe(path: Path, art_dir: Path | None = None, panel_tables: Path = PA
         raise ValueError(f"{path.name}: layers must be a list")
     try:
         layers = [_layer(index, entry, panels, art_dir, art) for index, entry in enumerate(layers)]
+        thumbnail = _art(data["thumbnail"], "thumbnail", art_dir) if "thumbnail" in data else None
     except ValueError as error:
         raise ValueError(f"{path.name}: {error}") from None
-    return Recipe(path.stem, dict(car), paint, layers, panels, art)
+    if thumbnail is not None and thumbnail[:2] != THUMBNAIL_SIZE:
+        raise ValueError(f"{path.name}: thumbnail must be %d x %d, the size of the Autoshow's" % THUMBNAIL_SIZE)
+    return Recipe(path.stem, dict(car), paint, layers, panels, art, thumbnail)
 
 
 # -- compositing ------------------------------------------------------------

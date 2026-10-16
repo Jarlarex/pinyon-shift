@@ -187,5 +187,66 @@ class StringTableTests(unittest.TestCase):
                           "media/UI/Textures/Thumbnails/T.xds", "media/wheels/W/wheel.xds"])
 
 
+ui = load("inspect_fh1_ui_for_package", TOOLS / "inspect-fh1-ui.py")
+ui_tests = load("test_inspect_fh1_ui_for_package", Path(__file__).with_name("test_inspect_fh1_ui.py"))
+dlc = load("manage_fh1_dlc_for_package", TOOLS / "manage-fh1-dlc.py")
+
+
+class HeaderTests(unittest.TestCase):
+    def test_the_package_id_is_fixed_per_car_and_shaped_like_turn_10s(self):
+        self.assertEqual(package.package_id(3001), package.package_id(3001))
+        self.assertNotEqual(package.package_id(3001), package.package_id(3002))
+        self.assertRegex(package.package_id(3001), r"\A[0-9A-F]{40}4D\Z")
+        self.assertTrue(dlc.PACKAGE_ID.fullmatch(package.package_id(3007)))
+
+    def test_the_header_has_the_sdk_layout_and_licenses_the_offer(self):
+        name = "2012 Dodge Car Rockstar"
+        header = package.content_header("ABCDEF4D", name)
+        self.assertEqual(len(header), 332)
+        self.assertEqual(header[:8], bytes.fromhex("0000000100000002"))       # device 1, Marketplace content
+        self.assertEqual(header[8:8 + 2 * len(name)].decode("utf-16-be"), name)
+        self.assertEqual(header[8 + 2 * len(name):0x108], bytes(0x100 - 2 * len(name)))
+        self.assertEqual(header[0x108:0x140], b"ABCDEF4D" + bytes(0x30))
+        self.assertEqual(header[0x140:0x148], bytes.fromhex("4D5309C900000000"))
+        self.assertEqual(int.from_bytes(header[328:], "little"), 1)        # where the DLC manager reads the mask
+
+    def test_a_long_name_or_a_bad_package_id_is_refused(self):
+        with self.assertRaisesRegex(ValueError, "127 characters"):
+            package.content_header("ABCDEF4D", "x" * 128)
+        for bad in ("abc", "", "G" * 4, "A" * 43):
+            with self.subTest(bad=bad), self.assertRaisesRegex(ValueError, "package ID"):
+                package.content_header(bad, "Car")
+
+
+class ThumbnailTests(unittest.TestCase):
+    def stock(self):
+        payload = bytes((index * 7) & 0xFF for index in range(32 * 32 * 4))
+        return ui_tests.make_xds(32, 8, 6, 2, payload, swizzle="ZYXW")     # k_8_8_8_8, tiled, as the thumbnails
+
+    def test_without_art_the_stock_thumbnail_is_kept(self):
+        self.assertEqual(package.thumbnail_xds(self.stock(), None), self.stock())
+
+    def test_art_is_written_into_the_stock_textures_storage(self):
+        art = (32, 8, bytes((x * 8, y * 32, 99, 255)[c] for y in range(8) for x in range(32) for c in range(4)))
+        out = package.thumbnail_xds(self.stock(), art)
+        self.assertEqual(ui.decode_xds(out)[1], art[2])
+        self.assertEqual(out[:ui.XDS_HEADER_SIZE], self.stock()[:ui.XDS_HEADER_SIZE])
+
+    def test_art_of_another_size_is_refused(self):
+        with self.assertRaisesRegex(ValueError, "32 x 8"):
+            package.thumbnail_xds(self.stock(), (16, 8, bytes(16 * 8 * 4)))
+
+    def test_the_stock_thumbnail_comes_from_the_discs_ui_textures(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as directory:
+            game = Path(directory) / "game"
+            clone_tests.write_zip(game / "media/ui/Textures.zip", {"Thumbnails/Thumbnail_1557.xds": b"thumb",
+                                                                   "Thumbnails/Thumbnail_1600.xds": b"other"})
+            sources = clone.Sources(Path(directory) / "state", game, Path("extractor.exe"))
+            self.assertEqual(package.stock_thumbnail(sources, 1557), b"thumb")
+            with self.assertRaisesRegex(ValueError, "no thumbnail for car 1548"):
+                package.stock_thumbnail(sources, 1548)
+
+
 if __name__ == "__main__":
     unittest.main()

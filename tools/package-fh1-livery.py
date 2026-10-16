@@ -146,3 +146,71 @@ def string_files(tables: dict[str, bytes], car_id: int) -> dict[str, bytes]:
                                 b'</stringtables> \r\n',
             "zipmount.xml": f'<?xml version="1.0" ?> \r\n<zipmount> \r\n   <zip Name="{archive}" '
                             f'Mount="game:\\Media\\StringTables\\"  /> \r\n</zipmount> \r\n'.encode("ascii")}
+
+
+# -- thumbnail and header ---------------------------------------------------
+
+def _find(folder: Path, *parts: str) -> Path | None:
+    """A path below `folder`, matching each part in any case (the disc has media/ui/Textures.zip)."""
+    for part in parts:
+        if not folder.is_dir():
+            return None
+        folder = next((child for child in sorted(folder.iterdir()) if child.name.lower() == part.lower()), None)
+        if folder is None:
+            return None
+    return folder
+
+
+def stock_thumbnail(sources, stock_id: int) -> bytes:
+    """The stock car's Autoshow thumbnail from the disc's media/ui/Textures.zip."""
+    import zipfile
+
+    name = f"thumbnails/thumbnail_{stock_id}.xds"
+    archive = _find(sources.game_root, "media", "ui", "textures.zip")
+    if archive is not None:
+        with zipfile.ZipFile(archive) as zipped:
+            info = next((info for info in zipped.infolist() if info.filename.replace("\\", "/").lower() == name), None)
+        if info is not None:
+            return sources.member(archive, info)
+    raise ValueError(f"the disc has no thumbnail for car {stock_id} (Thumbnails/Thumbnail_{stock_id}.xds "
+                     "in media/ui/Textures.zip)")
+
+
+def thumbnail_xds(stock: bytes, art: tuple[int, int, bytes] | None) -> bytes:
+    """The livery car's thumbnail: the stock car's, or the recipe's art written into its storage
+    (an uncompressed 8888 texture, so only the texels change)."""
+    if art is None:
+        return stock
+    ui = _load_tool("inspect-fh1-ui")
+    header = ui.parse_xds(stock)
+    if art[:2] != (header["width"], header["height"]):
+        raise ValueError(f"the thumbnail art must be {header['width']} x {header['height']}, the stock thumbnail's size")
+    return ui.reencode_xds(stock, art[2])
+
+
+def package_id(car_id: int) -> str:
+    """The livery car's package ID, the same on every build: 40 hex digits and 4D, the shape of Turn 10's."""
+    import hashlib
+
+    return hashlib.sha1(f"pinyon-shift/livery-car/{car_id}".encode()).hexdigest().upper() + "4D"
+
+
+def content_header(package: str, display_name: str, mask: int = LICENSE_MASK) -> bytes:
+    """The 332-byte content header the SDK keeps beside an installed package: device 1 and content
+    type 2 (Marketplace), the display name (UTF-16BE, 128 characters with the terminator), the
+    package ID, the title, and at byte 328 the licence mask (little-endian) the title ORs into the
+    package's offer."""
+    import re
+
+    if not re.fullmatch(r"[0-9A-F]{1,42}", package):
+        raise ValueError(f"package ID {package!r} must be 1 to 42 upper-case hex digits")
+    if len(display_name) > 127:
+        raise ValueError("a package's display name holds at most 127 characters")
+    header = bytearray(332)
+    header[0:8] = (1).to_bytes(4, "big") + (2).to_bytes(4, "big")
+    name = display_name.encode("utf-16-be")
+    header[8:8 + len(name)] = name
+    header[0x108:0x108 + len(package)] = package.encode("ascii")
+    header[0x140:0x144] = TITLE_ID.to_bytes(4, "big")
+    header[328:332] = mask.to_bytes(4, "little")
+    return bytes(header)
