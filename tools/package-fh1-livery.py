@@ -116,3 +116,33 @@ def package_rows(merge: bytes, game_db: sqlite3.Connection, car: dict, paint: tu
     return database, {"price": price, "paint": "%02X%02X%02X" % paint, "dropped": dropped,
                       "offer": {"offer_id": f"{offer:016X}", "pub_offering_id": car_id,
                                 "license_mask": LICENSE_MASK, "mapping_id": mapping_id(car_id)}}
+
+
+# -- string tables ----------------------------------------------------------
+
+def member_order(name: str) -> list[tuple[int, str]]:
+    """Sort key giving Turn 10's archive order: at each folder level its files come before its
+    subfolders, and names compare in upper case (damagelights.xds before damage_LOD0.xds)."""
+    parts = name.split("/")
+    return [(1, part.upper()) for part in parts[:-1]] + [(0, parts[-1].upper())]
+
+
+def livery_tables(tables: dict[str, tuple[int, str, bytes]], entries: list[tuple[int, str]]) -> dict[str, bytes]:
+    """Each language's Data_Car table (from Sources.string_tables, the livery packages left out)
+    with every enabled livery car's names added. The title uses only the highest-priority copy of
+    each table, so every livery package carries the whole table."""
+    strings = _load_tool("fh1-strings")
+    return {lang: strings.replace_strings(data, dict(entries)) for lang, (_, _, data) in tables.items()}
+
+
+def string_files(tables: dict[str, bytes], car_id: int) -> dict[str, bytes]:
+    """The files that ship the tables in Media/DLCZips, in the text format of Turn 10's packages:
+    StringTables_pri_<car ID>.zip (above every Turn 10 priority), stringtables.xml and zipmount.xml."""
+    archive = f"StringTables_pri_{car_id}.zip"
+    members = sorted(((f"{lang}/Data_Car.str", data) for lang, data in tables.items()),
+                     key=lambda member: member_order(member[0]))
+    return {archive: _load_tool("patch-fh1-archive").write_archive(members),
+            "stringtables.xml": b'<?xml version="1.0" ?> \r\n<stringtables> \r\n   <table Name="Data_Car" /> \r\n'
+                                b'</stringtables> \r\n',
+            "zipmount.xml": f'<?xml version="1.0" ?> \r\n<zipmount> \r\n   <zip Name="{archive}" '
+                            f'Mount="game:\\Media\\StringTables\\"  /> \r\n</zipmount> \r\n'.encode("ascii")}

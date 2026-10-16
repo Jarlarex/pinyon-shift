@@ -131,6 +131,31 @@ class SourcesTests(unittest.TestCase):
     def test_data_car_string_keys_come_from_the_disc_and_every_installed_table(self):
         self.assertEqual(self.files.sources().data_car_keys(), {24056, 24057, 7451})
 
+    def test_each_language_takes_its_highest_priority_table(self):
+        newer = self.files.state / TITLE / "00000002/NEWER/Media/DLCZips"
+        write_zip(newer / "StringTables_pri_3001.zip", {"EN/Data_Car.str": string_table([(6002, "Livery car")]),
+                                                        "FR/Data_Car.str": string_table([(6002, "Voiture")])})
+        write_zip(newer / "StringTables_pri_900.zip", {"DE/Data_Car.str": string_table([(1, "Older")])})
+        tables = self.files.sources().string_tables("data_car.str")
+        self.assertEqual({lang: (priority, label) for lang, (priority, label, _) in tables.items()},
+                         {"EN": (3001, "NEWER/StringTables_pri_3001.zip"), "FR": (3001, "NEWER/StringTables_pri_3001.zip"),
+                          "DE": (900, "NEWER/StringTables_pri_900.zip")})
+        # A skipped package (the livery packages, whose tables are rebuilt) leaves the rest.
+        tables = self.files.sources().string_tables("data_car.str", skip={"NEWER"})
+        self.assertEqual({lang: (priority, label) for lang, (priority, label, _) in tables.items()},
+                         {"EN": (2950, "PKG/StringTables_pri_2950.zip"), "DE": (0, "disc DE.zip")})
+        self.assertEqual(clone._load_tool("fh1-strings").parse(tables["DE"][2]), [(24057, "Stockwagen")])
+
+    def test_an_excluded_package_is_absent_from_every_lookup(self):
+        sources = clone.Sources(self.files.state, self.files.game, Path("extractor.exe"), exclude={"PKG"})
+        con = sources.database()
+        self.addCleanup(con.close)
+        self.assertEqual([row[0] for row in con.execute("SELECT Id FROM Data_Car ORDER BY Id")], [1557, 1600])
+        self.assertIsNone(sources.car_source("DLC_Car_13"))
+        self.assertEqual(sources.data_car_keys(), {24056, 24057})
+        self.assertEqual(set(sources.string_tables("data_car.str")), {"EN", "DE"})
+        self.assertNotIn("PKG", {path.parents[2].name for path in sources.inputs()})
+
     def test_a_disc_car_reads_its_archive_and_its_audio_tuning(self):
         sources = self.files.sources()
         self.assertEqual(sources.car_files("STOCK_Car_12"),

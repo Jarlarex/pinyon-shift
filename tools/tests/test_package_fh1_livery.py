@@ -139,5 +139,53 @@ class PackageRowTests(unittest.TestCase):
             package.package_rows(self.merge, self.db, CAR | {"new_id": 3002}, (0, 0, 0))
 
 
+strings = load("fh1_strings_for_package", TOOLS / "fh1-strings.py")
+archives = load("patch_fh1_archive_for_package", TOOLS / "patch-fh1-archive.py")
+
+
+def read_zip(data: bytes) -> list[tuple[str, bytes]]:
+    import io
+    import zipfile
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        return [(info.filename, archive.read(info)) for info in archive.infolist()]
+
+
+class StringTableTests(unittest.TestCase):
+    BASE = {"EN": (2950, "PKG/StringTables_pri_2950.zip", clone_tests.string_table([(7451, "Pizza Hut"), (24056, "Car")])),
+            "br": (0, "disc br.zip", clone_tests.string_table([(24056, "Carro")]))}
+    LIVERY = [(6002, "Car Rockstar"), (6003, "Car"), (6004, "Car Meguiar's"), (6005, "Car")]
+
+    def test_every_language_keeps_its_base_entries_and_gains_the_livery_cars(self):
+        tables = package.livery_tables(self.BASE, self.LIVERY)
+        self.assertEqual(set(tables), {"EN", "br"})
+        self.assertEqual(strings.parse(tables["EN"]), [(6002, "Car Rockstar"), (6003, "Car"), (6004, "Car Meguiar's"),
+                                                       (6005, "Car"), (7451, "Pizza Hut"), (24056, "Car")])
+        self.assertEqual(dict(strings.parse(tables["br"]))[24056], "Carro")
+        self.assertEqual(dict(strings.parse(tables["br"]))[6004], "Car Meguiar's")
+
+    def test_the_string_files_are_shaped_like_turn_10s(self):
+        files = package.string_files(package.livery_tables(self.BASE, self.LIVERY), 3001)
+        self.assertEqual(sorted(files), ["StringTables_pri_3001.zip", "stringtables.xml", "zipmount.xml"])
+        self.assertEqual([name for name, _ in read_zip(files["StringTables_pri_3001.zip"])],
+                         ["br/Data_Car.str", "EN/Data_Car.str"])           # Turn 10's order ignores case
+        self.assertEqual(files["stringtables.xml"],
+                         b'<?xml version="1.0" ?> \r\n<stringtables> \r\n   <table Name="Data_Car" /> \r\n'
+                         b'</stringtables> \r\n')
+        self.assertEqual(files["zipmount.xml"],
+                         b'<?xml version="1.0" ?> \r\n<zipmount> \r\n   <zip Name="StringTables_pri_3001.zip" '
+                         b'Mount="game:\\Media\\StringTables\\"  /> \r\n</zipmount> \r\n')
+
+    def test_members_follow_turn_10s_order(self):
+        names = ["media/wheels/W/wheel.xds", "media/cars/C/LiveryMasks/TOP.tga", "media/cars/C/damage_LOD0.xds",
+                 "media/cars/C/damagelights.xds", "media/cars/C/BuildNumber.txt", "media/UI/Textures/Thumbnails/T.xds",
+                 "media/db/patch/1_merge.slt", "media/cars/C/C.carbin", "media/cars/C/C_lod0.carbin"]
+        # Files before folders at each level, names compared in upper case, as Turn 10's packager wrote them.
+        self.assertEqual(sorted(names, key=package.member_order),
+                         ["media/cars/C/BuildNumber.txt", "media/cars/C/C.carbin", "media/cars/C/C_lod0.carbin",
+                          "media/cars/C/damagelights.xds", "media/cars/C/damage_LOD0.xds",
+                          "media/cars/C/LiveryMasks/TOP.tga", "media/db/patch/1_merge.slt",
+                          "media/UI/Textures/Thumbnails/T.xds", "media/wheels/W/wheel.xds"])
+
+
 if __name__ == "__main__":
     unittest.main()

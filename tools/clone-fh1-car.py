@@ -35,10 +35,12 @@ def _load_tool(name: str):
 
 
 class Sources:
-    """Read-only view of the player's disc, installed title update and enabled packages."""
+    """Read-only view of the player's disc, installed title update and enabled packages.
+    `exclude` names packages to treat as absent, as a livery car's rebuild does with its own."""
 
-    def __init__(self, state_root: Path, game_root: Path, extractor: Path):
+    def __init__(self, state_root: Path, game_root: Path, extractor: Path, exclude=frozenset()):
         self.state_root, self.game_root, self.extractor = Path(state_root), Path(game_root), Path(extractor)
+        self.exclude = frozenset(exclude)
 
     # -- archives ---------------------------------------------------------
 
@@ -69,8 +71,9 @@ class Sources:
         return {info.filename[len(prefix):]: self.member(archive, info) for info in infos}
 
     def _package_archives(self) -> list[Path]:
-        """Every DLCZips archive of the enabled packages (Disabled/ is skipped)."""
-        return sorted((self.state_root / TITLE_CONTENT / "00000002").glob("*/Media/DLCZips/*.zip"))
+        """Every DLCZips archive of the enabled packages (Disabled/ and excluded packages are skipped)."""
+        return sorted(path for path in (self.state_root / TITLE_CONTENT / "00000002").glob("*/Media/DLCZips/*.zip")
+                      if path.parents[2].name not in self.exclude)
 
     # -- database ---------------------------------------------------------
 
@@ -132,6 +135,35 @@ class Sources:
             if archive.name.lower().startswith("stringtables_"):
                 tables += self._members(archive, file_name="data_car.str").values()
         return {key for data in tables for key, _ in strings.parse(data)}
+
+    def string_tables(self, file_name: str, skip=frozenset()) -> dict[str, tuple[int, str, bytes]]:
+        """Each language's copy of a string table (e.g. "data_car.str") that the title uses: the
+        enabled package's StringTables_pri_<N>.zip with the highest N, else the disc's
+        media/StringTables/<lang>.zip (priority 0); {lang: (priority, source, bytes)}. Packages in
+        `skip` are left out (the livery packages, whose tables are rebuilt from the others)."""
+        found: dict[str, tuple[int, str, Path, str, str]] = {}   # lower-case language -> where its table is
+        for archive in sorted((self.game_root / "media/StringTables").glob("*.zip")):
+            with zipfile.ZipFile(archive) as zipped:
+                member = next((name for name in zipped.namelist() if name.lower() == file_name), None)
+            if member:
+                found[archive.stem.lower()] = (0, f"disc {archive.name}", archive, member, archive.stem)
+        for archive in self._package_archives():
+            match = re.fullmatch(r"stringtables_pri_(\d+)\.zip", archive.name, re.IGNORECASE)
+            if not match or archive.parents[2].name in skip:
+                continue
+            priority = int(match.group(1))
+            with zipfile.ZipFile(archive) as zipped:
+                names = zipped.namelist()
+            for name in names:
+                lang, _, table = name.replace("\\", "/").partition("/")
+                if table.lower() == file_name and priority >= found.get(lang.lower(), (-1,))[0]:
+                    found[lang.lower()] = (priority, f"{archive.parents[2].name}/{archive.name}", archive, name, lang)
+        tables = {}
+        for priority, label, archive, member, lang in found.values():
+            with zipfile.ZipFile(archive) as zipped:
+                info = zipped.getinfo(member)
+            tables[lang] = (priority, label, self.member(archive, info))
+        return tables
 
     # -- car files --------------------------------------------------------
 
