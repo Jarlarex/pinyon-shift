@@ -407,6 +407,75 @@ class BuildPackageTests(unittest.TestCase):
         self.assertIn("already exists", err.getvalue())
 
 
+xds = load("fh1_xds_for_package", TOOLS / "fh1_xds.py")
+
+
+def autoshow_thumbnail(seed: int = 7) -> bytes:
+    """A 768 x 288 k_8_8_8_8 tiled texture with the header of an Autoshow thumbnail."""
+    payload = bytes((index * seed + index // 4096) & 0xFF for index in range(768 * 288 * 4))
+    return ui_tests.make_xds(768, 288, 6, 2, payload, swizzle="ZYXW", pitch=768)
+
+
+def cxds(texture: bytes, chunks: int = 1, version: int = 2) -> bytes:
+    """A garage thumbnail container: magic, version, total size, then (packed, unpacked, raw deflate) chunks."""
+    import struct
+    import zlib
+    out = bytearray(b"cxds" + struct.pack(">II", version, len(texture)))
+    step = -(-len(texture) // chunks)
+    for at in range(0, len(texture), step):
+        piece = texture[at:at + step]
+        packer = zlib.compressobj(6, zlib.DEFLATED, -15)
+        packed = packer.compress(piece) + packer.flush()
+        out += struct.pack(">II", len(packed), len(piece)) + packed
+    return bytes(out)
+
+
+class GarageThumbnailTests(unittest.TestCase):
+    def test_a_garage_thumbnail_becomes_the_png_a_recipe_names(self):
+        texture = autoshow_thumbnail()
+        for chunks in (1, 2):
+            with self.subTest(chunks=chunks):
+                width, height, rgba = xds.decode_png(package.garage_thumbnail(cxds(texture, chunks)))
+                self.assertEqual((width, height), (768, 288))
+                self.assertEqual(rgba, ui.decode_xds(texture)[1])
+
+    def test_the_png_re_encodes_to_the_garage_texture_byte_for_byte(self):
+        texture, stock = autoshow_thumbnail(), autoshow_thumbnail(seed=3)
+        art = xds.decode_png(package.garage_thumbnail(cxds(texture)))
+        self.assertEqual(package.thumbnail_xds(stock, art), texture)
+
+    def test_damaged_or_foreign_files_are_refused(self):
+        import struct
+        good = cxds(autoshow_thumbnail())
+        small = ui_tests.make_xds(32, 8, 6, 2, bytes(32 * 32 * 4), swizzle="ZYXW")
+        cases = {"no cxds header": b"xdsc" + good[4:],
+                 "version 3": cxds(autoshow_thumbnail(), version=3),
+                 "truncated": good[:-100],
+                 "damaged": good[:20] + bytes(64) + good[84:],
+                 "sizes do not match": good[:8] + struct.pack(">I", 999) + good[12:],
+                 "not an Autoshow thumbnail": cxds(small)}
+        for message, data in cases.items():
+            with self.subTest(message), self.assertRaisesRegex(ValueError, message):
+                package.garage_thumbnail(data)
+
+    def test_the_thumbnail_command_writes_the_png_once(self):
+        import io
+        import json
+        import tempfile
+        from contextlib import redirect_stderr, redirect_stdout
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "Thumbnail_45.xdc").write_bytes(cxds(autoshow_thumbnail()))
+            args = ["thumbnail", "--xdc", str(root / "Thumbnail_45.xdc"), "--output", str(root / "art/thumbnail.png")]
+            out, err = io.StringIO(), io.StringIO()
+            with redirect_stdout(out), redirect_stderr(err):
+                self.assertEqual(package.main(args), 0, err.getvalue())
+                self.assertEqual(package.main(args), 1)
+            self.assertEqual(json.loads(out.getvalue())["size"], "768x288")
+            self.assertIn("already exists", err.getvalue())
+            self.assertEqual(xds.decode_png((root / "art/thumbnail.png").read_bytes())[:2], (768, 288))
+
+
 class CommittedTestRecipeTests(unittest.TestCase):
     def test_the_in_game_test_recipes_load_without_art(self):
         recipes = sorted((TOOLS.parent / "config/livery-cars/tests").glob("*.json"))

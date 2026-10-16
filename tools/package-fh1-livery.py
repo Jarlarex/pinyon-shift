@@ -215,6 +215,49 @@ def thumbnail_xds(stock: bytes, art: tuple[int, int, bytes] | None) -> bytes:
     return ui.reencode_xds(stock, art[2])
 
 
+def garage_thumbnail(xdc: bytes) -> bytes:
+    """The garage thumbnail the title renders when a car is bought (the profile's
+    Thumbnails/Thumbnail_<n>.xdc), as the 768 x 288 RGBA PNG a recipe names as its
+    "thumbnail". The file is a cxds container: magic, version 2, the unpacked size, then
+    chunks of (packed size, unpacked size, raw deflate); unpacked, it is exactly an
+    Autoshow thumbnail, header included, showing the car with its livery."""
+    import struct
+    import zlib
+
+    if len(xdc) < 12 or xdc[:4] != b"cxds":
+        raise ValueError("not a garage thumbnail: no cxds header")
+    version, total = struct.unpack_from(">II", xdc, 4)
+    if version != 2:
+        raise ValueError(f"garage thumbnail cxds version {version} is not 2")
+    at, texture = 12, bytearray()
+    while len(texture) < total:
+        if at + 8 > len(xdc):
+            raise ValueError("the garage thumbnail is truncated")
+        packed, unpacked = struct.unpack_from(">II", xdc, at)
+        at += 8
+        if at + packed > len(xdc):
+            raise ValueError("the garage thumbnail is truncated")
+        try:
+            chunk = zlib.decompress(xdc[at:at + packed], -15)
+        except zlib.error:
+            raise ValueError("the garage thumbnail's data is damaged") from None
+        if len(chunk) != unpacked:
+            raise ValueError("the garage thumbnail's chunk sizes do not match")
+        texture += chunk
+        at += packed
+    if len(texture) != total or at != len(xdc):
+        raise ValueError("the garage thumbnail's sizes do not match")
+    ui = _load_tool("inspect-fh1-ui")
+    try:
+        header = ui.parse_xds(bytes(texture))
+    except ValueError:
+        raise ValueError("the garage thumbnail is not an Autoshow thumbnail") from None
+    if (header["format"], header["width"], header["height"], header["tiled"]) != ("k_8_8_8_8", 768, 288, True):
+        raise ValueError("the garage thumbnail is not an Autoshow thumbnail (768 x 288 k_8_8_8_8)")
+    _, rgba = ui.decode_xds(bytes(texture))
+    return _load_tool("fh1_xds").encode_png(768, 288, rgba)
+
+
 def package_id(car_id: int) -> str:
     """The livery car's package ID, the same on every build: 40 hex digits and 4D, the shape of Turn 10's."""
     import hashlib
@@ -335,7 +378,24 @@ def main(argv: list[str] | None = None) -> int:
     build.add_argument("--extractor", type=Path, help="archive extractor (default: the one the build made)")
     build.add_argument("--panels", type=Path, default=PANEL_TABLES, help=argparse.SUPPRESS)
     build.add_argument("--ids", type=Path, default=ID_TABLE, help=argparse.SUPPRESS)
+    thumbnail = commands.add_parser("thumbnail", help="the garage thumbnail of a bought car as a recipe's thumbnail art")
+    thumbnail.add_argument("--xdc", type=Path, required=True,
+                           help="the profile's ForzaProfile/Thumbnails/Thumbnail_<n>.xdc, from a private run's state")
+    thumbnail.add_argument("--output", type=Path, required=True, help="the PNG to write, e.g. .local/livery-art/<recipe>/thumbnail.png")
     args = parser.parse_args(argv)
+    if args.command == "thumbnail":
+        try:
+            if args.output.exists():
+                raise ValueError(f"{args.output} already exists; choose a new file")
+            png = garage_thumbnail(args.xdc.read_bytes())
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            args.output.write_bytes(png)
+        except (OSError, ValueError) as error:
+            print(str(error), file=sys.stderr)
+            return 1
+        print(json.dumps({"output": str(args.output), "size": "768x288",
+                          "sha256": hashlib.sha256(png).hexdigest().upper()}))
+        return 0
     try:
         recipe = _load_tool("paint-fh1-livery").load_recipe(args.recipe, art_dir=args.art, panel_tables=args.panels,
                                                             id_table=args.ids)
