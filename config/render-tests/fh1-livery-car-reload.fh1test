@@ -1,0 +1,43 @@
+pinyon-shift-fh1-render-test-v1
+# livery-package check (SPEC-livery-package criterion 7): reload the save fh1-livery-car-buy left and
+# drive car 3001 again. Seed: that run's private state folder (<output>.state, e.g.
+# .local\render-tests\fh1-livery-car-buy.state); the runner copies it again, so it is not written.
+# The player spawns outside the Autoshow in car 3001.
+# The native DLC trace logs the title's entitlement and rows for car 3001 and the stock car:
+# dlc-car-trace
+# dlc-car-ids 3001,1557
+# In free roam the throttle is held until the car has moved 15 m, then the camera turns to each side
+# (drive-rear, look-right, look-left, look-back).
+input 0 0000 0 0 0 0 0 0
+input 360 1000 0 0 0 0 0 0
+input 366 0000 0 0 0 0 0 0
+input 480 1000 0 0 0 0 0 0
+input 486 0000 0 0 0 0 0 0
+input 600 1000 0 0 0 0 0 0
+input 606 0000 0 0 0 0 0 0
+input 720 1000 0 0 0 0 0 0
+input 726 0000 0 0 0 0 0 0
+input 1000 1000 0 0 0 0 0 0
+input 1006 0000 0 0 0 0 0 0
+input 1150 1000 0 0 0 0 0 0
+input 1156 0000 0 0 0 0 0 0
+input 1300 1000 0 0 0 0 0 0
+input 1306 0000 0 0 0 0 0 0
+wait 1400 4000 freeroam
+capture 1700 free-roam
+capture 2350 spawn
+input 2500 0000 0 255 0 0 0 0
+wait 2510 3000 vehicle-moved 15
+capture 2520 drive-rear
+input 2530 0000 255 0 0 0 0 0
+input 2650 0000 0 0 0 0 0 0
+input 2700 0000 0 0 0 0 32767 0
+capture 2745 look-right
+input 2760 0000 0 0 0 0 0 0
+input 2790 0000 0 0 0 0 -32768 0
+capture 2835 look-left
+input 2850 0000 0 0 0 0 0 0
+input 2880 0000 0 0 0 0 0 32767
+capture 2925 look-back
+input 2940 0000 0 0 0 0 0 0
+stop 3000

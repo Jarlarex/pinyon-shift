@@ -1,0 +1,121 @@
+pinyon-shift-fh1-render-test-v1
+# livery-package check (SPEC-livery-package criterion 7): buy car 3001 in the Autoshow for credits and
+# drive it in free roam.
+# Seed: a render seed of the .local/preview save (it spawns at Dak's Garage with enough credits) with the
+# car installed by `tools/manage-fh1-dlc.py install-livery --recipe config\livery-cars\tests\challenger-test.json
+# --state-root <seed> --game-root .local\game\eur-base`. The route presses A again at frames 1000-1300, which
+# a modded profile needs and an unmodded one ignores.
+# The native DLC trace logs the title's entitlement and rows for car 3001 and the stock car:
+# dlc-car-trace
+# dlc-car-ids 3001,1557
+# Route: pause, MAP, the cursor nudged onto the Autoshow, Y fast travel, A; X enters the Autoshow; right
+# 14 times to Dodge (the carousel order with the 16 EU packages installed), A; right 4 times to car 3001,
+# listed after the stock Challenger, A: the showroom.
+# A: BUY; A: buy with credits; the title saves (waits for the garage thumbnail it renders, a .xdc in
+# the profile); A at the "return to free roam" prompt (pressed three times; the later presses are a
+# brake tap). The run's .state folder is the reload route's seed.
+# In free roam the throttle is held until the car has moved 15 m, then the camera turns to each side
+# (drive-rear, look-right, look-left, look-back).
+input 0 0000 0 0 0 0 0 0
+input 360 1000 0 0 0 0 0 0
+input 366 0000 0 0 0 0 0 0
+input 480 1000 0 0 0 0 0 0
+input 486 0000 0 0 0 0 0 0
+input 600 1000 0 0 0 0 0 0
+input 606 0000 0 0 0 0 0 0
+input 720 1000 0 0 0 0 0 0
+input 726 0000 0 0 0 0 0 0
+input 1000 1000 0 0 0 0 0 0
+input 1006 0000 0 0 0 0 0 0
+input 1150 1000 0 0 0 0 0 0
+input 1156 0000 0 0 0 0 0 0
+input 1300 1000 0 0 0 0 0 0
+input 1306 0000 0 0 0 0 0 0
+wait 1400 4000 freeroam
+capture 1700 free-roam
+input 2350 0010 0 0 0 0 0 0
+input 2356 0000 0 0 0 0 0 0
+input 2600 1000 0 0 0 0 0 0
+input 2606 0000 0 0 0 0 0 0
+input 3020 0000 0 0 20000 15000 0 0
+input 3035 0000 0 0 0 0 0 0
+input 3100 8000 0 0 0 0 0 0
+input 3106 0000 0 0 0 0 0 0
+input 3250 1000 0 0 0 0 0 0
+input 3256 0000 0 0 0 0 0 0
+capture 4800 arrived
+input 4850 4000 0 0 0 0 0 0
+input 4856 0000 0 0 0 0 0 0
+capture 5250 makes
+input 5450 0008 0 0 0 0 0 0
+input 5456 0000 0 0 0 0 0 0
+input 5480 0008 0 0 0 0 0 0
+input 5486 0000 0 0 0 0 0 0
+input 5510 0008 0 0 0 0 0 0
+input 5516 0000 0 0 0 0 0 0
+input 5540 0008 0 0 0 0 0 0
+input 5546 0000 0 0 0 0 0 0
+input 5570 0008 0 0 0 0 0 0
+input 5576 0000 0 0 0 0 0 0
+input 5600 0008 0 0 0 0 0 0
+input 5606 0000 0 0 0 0 0 0
+input 5630 0008 0 0 0 0 0 0
+input 5636 0000 0 0 0 0 0 0
+input 5660 0008 0 0 0 0 0 0
+input 5666 0000 0 0 0 0 0 0
+input 5690 0008 0 0 0 0 0 0
+input 5696 0000 0 0 0 0 0 0
+input 5720 0008 0 0 0 0 0 0
+input 5726 0000 0 0 0 0 0 0
+input 5750 0008 0 0 0 0 0 0
+input 5756 0000 0 0 0 0 0 0
+input 5780 0008 0 0 0 0 0 0
+input 5786 0000 0 0 0 0 0 0
+input 5810 0008 0 0 0 0 0 0
+input 5816 0000 0 0 0 0 0 0
+input 5840 0008 0 0 0 0 0 0
+input 5846 0000 0 0 0 0 0 0
+input 5930 1000 0 0 0 0 0 0
+input 5936 0000 0 0 0 0 0 0
+input 6370 0008 0 0 0 0 0 0
+input 6376 0000 0 0 0 0 0 0
+input 6420 0008 0 0 0 0 0 0
+input 6426 0000 0 0 0 0 0 0
+input 6470 0008 0 0 0 0 0 0
+input 6476 0000 0 0 0 0 0 0
+input 6520 0008 0 0 0 0 0 0
+input 6526 0000 0 0 0 0 0 0
+capture 6590 card
+input 6610 1000 0 0 0 0 0 0
+input 6616 0000 0 0 0 0 0 0
+wait 6620 1500 file playerdatabase
+capture 6870 showroom
+input 6890 1000 0 0 0 0 0 0
+input 6896 0000 0 0 0 0 0 0
+capture 6950 confirm
+input 6970 1000 0 0 0 0 0 0
+input 6976 0000 0 0 0 0 0 0
+capture 7020 saving
+wait 7030 3600 file .xdc
+capture 7270 return-prompt
+input 7290 1000 0 0 0 0 0 0
+input 7296 0000 0 0 0 0 0 0
+input 7410 1000 0 0 0 0 0 0
+input 7416 0000 0 0 0 0 0 0
+input 7530 1000 0 0 0 0 0 0
+input 7536 0000 0 0 0 0 0 0
+input 7670 0000 0 255 0 0 0 0
+wait 7680 3000 vehicle-moved 15
+capture 7690 drive-rear
+input 7700 0000 255 0 0 0 0 0
+input 7820 0000 0 0 0 0 0 0
+input 7870 0000 0 0 0 0 32767 0
+capture 7915 look-right
+input 7930 0000 0 0 0 0 0 0
+input 7960 0000 0 0 0 0 -32768 0
+capture 8005 look-left
+input 8020 0000 0 0 0 0 0 0
+input 8050 0000 0 0 0 0 0 32767
+capture 8095 look-back
+input 8110 0000 0 0 0 0 0 0
+stop 8170

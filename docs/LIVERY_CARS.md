@@ -282,6 +282,13 @@ python tools\manage-fh1-dlc.py install-livery --recipe config\livery-cars\<name>
 python tools\manage-fh1-dlc.py refresh-livery-strings --state-root <state>   # also runs after every change
 ```
 
+The in-game checks run from a render seed with the test car installed by
+`install-livery`: `fh1-livery-car-showroom` opens car 3001's Autoshow
+showroom, `fh1-livery-car-buy` buys it for credits and drives it in free
+roam, and `fh1-livery-car-reload`, started from the buy run's private state
+folder, reloads that save and drives it again. Each logs the native DLC trace
+for car 3001 and the stock Challenger.
+
 `config/livery-cars/tests/` holds two recipes for the in-game checks, fills
 and bands only: a Challenger test livery (car 3001) and a Fiesta orientation
 livery (car 3006) that draws the probe's quadrant patches in colour. They are
@@ -296,3 +303,4 @@ used in private render seeds only.
 | 2026-10-16 | In game, EU v4 build: the built package placed by hand in a private seed of `.local/preview` (no mods), the Autoshow's Dodge list, with the native DLC trace (`# dlc-car-trace`, `# dlc-car-ids 3001,1557`) | the title mounts the package: `dlc.content_entitlement` for car 3001 **installed 1, purchased 1, visible 1** (as the Pizza Hut's and Shelby's), `dlc.car_database` **installed, purchased, selectable, drivable** with the stock Challenger's upgrade counts (5 tyre, 5 suspension, 1 engine). Dodge shows a NEW badge; the list holds **"Challenger SRT8 392 Livery Test"** (2012 Dodge, A 507, **45,000 Cr**) with the stock thumbnail and a NEW tag, after the stock Challenger, which is still listed; other DLC cars keep their names (the full table works) |
 | 2026-10-16 | The same seed: car 3001's showroom, orbit and raised captures | the **livery renders as painted**: the dark body, the yellow stripe over the hood, roof, nose and tail, the green band low on each side and the red block at each side's front-top. The bright yellow on a car whose paint colour is near-black shows that with `HasRaceLivery` 1 the paint area shows its texture colour as is, not blended with the paint colour (livery-paint open question 1). The showroom offers the car for 45,000 Cr or 2 Tokens |
 | 2026-10-16 | Checkpoint B in the same private seed: `install-livery` of `tests/challenger-test.json` over the hand-placed copy, then after removing it; `disable`, `enable`, a rebuild, `refresh-livery-strings` | refused over content without its record ("did not build"); then built, installed and enabled in **59 s**, byte-identical to the `build` command's package; `list` shows it as `generated`, `gameplay_unverified`; `disable` and `enable` move it; the rebuild keeps it enabled and keeps the old copy under `dlc/replaced/`; the refresh has nothing to rewrite; the seed's other **1,283 files** (saves, Turn 10 packages, title update, config) are unchanged |
+| 2026-10-16 | Spec criterion 7 in game: `fh1-livery-car-buy` from the seed with car 3001 installed by `install-livery`, then `fh1-livery-car-reload` from that run's private state | the showroom offers the car for **45,000 Cr or 2 Tokens**; bought for credits, the title saves and renders its garage thumbnail, and "return to free roam" puts the player in car 3001 outside the Autoshow. Driven, its livery shows from behind, from both sides and from above (the yellow stripe over roof and trunk, the green band and the red block at each side's front-top). The reload starts outside the Autoshow **in car 3001, livery intact**, and drives it again. Both runs: offer installed, purchased, visible; rows installed, purchased, selectable, drivable; no error events. The garage menu itself was not opened |
