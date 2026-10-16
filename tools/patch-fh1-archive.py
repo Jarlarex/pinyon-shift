@@ -4,6 +4,7 @@
 Ordinary ZIP writers cannot copy FH1's method-21 members, and the title reads
 absolute payload offsets from extra field 0x1123. Recalculate those offsets
 alongside the normal local-header offsets. Originals are never overwritten.
+write_archive builds a new archive of stored members in the same shape.
 """
 from __future__ import annotations
 
@@ -11,7 +12,7 @@ import argparse
 import struct
 import zipfile
 import zlib
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 
 def xmem_stored(data: bytes) -> bytes:
@@ -117,6 +118,49 @@ def patch_archive(source: Path, destination: Path, replacements: dict[str, bytes
                 output.close()
                 destination.unlink()
                 raise
+
+
+DOS_DATE_1980 = (1 << 5) | 1  # 1980-01-01, the earliest ZIP date, so equal members give equal bytes
+
+
+def write_archive(members: list[tuple[str, bytes]]) -> bytes:
+    """A new FH1 ZIP of stored members in the given order, shaped like Turn 10's
+    package archives: version 1.0, no flags or local extra field, and in each
+    central record extra field 0x1123 holding the absolute offset of the
+    member's data. Names are relative ASCII paths, unique ignoring case."""
+    if len(members) > 65535:
+        raise ValueError("an FH1 archive holds at most 65,535 members")
+    output, central, seen = bytearray(), bytearray(), set()
+    for name, data in members:
+        if (not name or name.endswith("/") or "\\" in name or not name.isascii() or
+                PurePosixPath(name).parts[0] == "/"):
+            raise ValueError(f"unsafe archive member name {name!r}")
+        safe_archive_path(name)
+        if name.lower() in seen:
+            raise ValueError(f"{name} is in the archive twice")
+        seen.add(name.lower())
+        encoded, crc = name.encode("ascii"), zlib.crc32(data)
+        offset = len(output)
+        if offset + 30 + len(encoded) + len(data) > 0xFFFFFFFF:
+            raise ValueError("the archive would need ZIP64")
+        output += struct.pack("<IHHHHHIIIHH", 0x04034B50, 10, 0, 0, 0, DOS_DATE_1980, crc,
+                              len(data), len(data), len(encoded), 0)
+        output += encoded
+        data_offset = len(output)
+        output += data
+        central += struct.pack("<IHHHHHHIIIHHHHHII", 0x02014B50, 10, 10, 0, 0, 0, DOS_DATE_1980, crc,
+                               len(data), len(data), len(encoded), 8, 0, 0, 0, 0, offset)
+        central += encoded + struct.pack("<HHI", 0x1123, 4, data_offset)
+    directory = len(output)
+    output += central
+    output += struct.pack("<IHHHHIIH", 0x06054B50, 0, 0, len(members), len(members), len(central), directory, 0)
+    return bytes(output)
+
+
+def safe_archive_path(name: str) -> None:
+    path = PurePosixPath(name.replace("\\", "/"))
+    if path.is_absolute() or ".." in path.parts or ":" in name or "\0" in name:
+        raise ValueError(f"unsafe archive member name {name!r}")
 
 
 def main() -> int:

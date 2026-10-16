@@ -89,5 +89,55 @@ class ArchivePatchTests(unittest.TestCase):
                 self.assertEqual(archive.read("flow.xml"), b"original")
 
 
+MODS_SPEC = importlib.util.spec_from_file_location("build_mod_archives_for_writer",
+    Path(__file__).parents[1] / "build-mod-archives.py")
+mods = importlib.util.module_from_spec(MODS_SPEC)
+MODS_SPEC.loader.exec_module(mods)
+
+
+class WriteArchiveTests(unittest.TestCase):
+    MEMBERS = [("media/cars/CAR_X_12/BuildNumber.txt", b"7\r\n"), ("media/cars/CAR_X_12/empty.bin", b""),
+               ("media/db/patch/3001000_merge.slt", bytes(range(256)) * 9), ("media/one.bin", b"\x01")]
+
+    def test_members_read_back_in_order_with_their_data_offsets(self):
+        data = patcher.write_archive(self.MEMBERS)
+        with zipfile.ZipFile(__import__("io").BytesIO(data)) as archive:
+            self.assertEqual([(i.filename, archive.read(i)) for i in archive.infolist()], self.MEMBERS)
+            for info in archive.infolist():
+                self.assertEqual(info.compress_type, 0)
+                self.assertEqual(info.date_time, (1980, 1, 1, 0, 0, 0))
+                tag, size, offset = struct.unpack("<HHI", info.extra)
+                self.assertEqual((tag, size), (0x1123, 4))
+                name_size, extra_size = struct.unpack_from("<HH", data, info.header_offset + 26)
+                self.assertEqual(offset, info.header_offset + 30 + name_size + extra_size)
+                self.assertEqual(data[offset:offset + info.file_size], dict(self.MEMBERS)[info.filename])
+        records, _ = mods.read_central(data)
+        self.assertEqual([info["name"] for _, info in records], [name for name, _ in self.MEMBERS])
+
+    def test_headers_match_turn_10s_packages(self):
+        data = patcher.write_archive(self.MEMBERS[:1])
+        local = struct.unpack_from("<IHHHHHIIIHH", data, 0)
+        self.assertEqual(local[1:6], (10, 0, 0, 0, 33))       # version 1.0, no flags, stored, 1980-01-01
+        self.assertEqual(local[10], 0)                         # the offset lives only in the central record
+        central = data.index(b"PK\x01\x02")
+        self.assertEqual(struct.unpack_from("<HH", data, central + 4), (10, 10))
+
+    def test_equal_members_give_equal_bytes(self):
+        self.assertEqual(patcher.write_archive(self.MEMBERS), patcher.write_archive(list(self.MEMBERS)))
+
+    def test_an_empty_archive_is_only_an_end_record(self):
+        self.assertEqual(patcher.write_archive([]), struct.pack("<IHHHHIIH", 0x06054B50, 0, 0, 0, 0, 0, 0, 0))
+
+    def test_unsafe_duplicate_and_too_many_members_are_refused(self):
+        for name in ("/abs.bin", "media/../up.bin", "media\\back.bin", "c:/drive.bin", "media/", "",
+                     "nul\0.bin", "media/caf\u00e9.bin"):
+            with self.subTest(name=name), self.assertRaises(ValueError):
+                patcher.write_archive([(name, b"x")])
+        with self.assertRaisesRegex(ValueError, "twice"):
+            patcher.write_archive([("media/a.bin", b"1"), ("MEDIA/A.BIN", b"2")])
+        with self.assertRaisesRegex(ValueError, "65,535"):
+            patcher.write_archive([(f"m/{i}", b"") for i in range(65536)])
+
+
 if __name__ == "__main__":
     unittest.main()
