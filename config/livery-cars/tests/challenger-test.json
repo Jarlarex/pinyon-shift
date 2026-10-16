@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "description": "In-game test livery for livery-package (no art): a dark body, a yellow stripe along the top over the nose and tail, a green band low on each side and a red block at each side's front-top. Private seeds only.",
+  "car": {"stock_id": 1557, "new_id": 3001, "stock_media": "DOD_ChallengerSRT8392_12", "media_name": "DOD_ChallengerSRT8392_TST_12", "display_name": "Challenger SRT8 392 Livery Test", "price": null},
+  "paint": {"rgb": "1E1E1E"},
+  "layers": [
+    {"fill": "1E1E1E", "panels": "all"},
+    {"band": "F2D500", "panel": "top", "u": [0, 1], "v": [0.42, 0.58]},
+    {"band": "F2D500", "panel": "front", "u": [0.42, 0.58], "v": [0, 1]},
+    {"band": "F2D500", "panel": "rear", "u": [0.42, 0.58], "v": [0, 1]},
+    {"band": "3CB44B", "panel": "left", "u": [0, 1], "v": [0.55, 0.75]},
+    {"band": "3CB44B", "panel": "right", "u": [0, 1], "v": [0.55, 0.75]},
+    {"band": "E6194B", "panel": "left", "u": [0.05, 0.25], "v": [0.15, 0.45]},
+    {"band": "E6194B", "panel": "right", "u": [0.05, 0.25], "v": [0.15, 0.45]}
+  ]
+}

@@ -9,14 +9,25 @@ car-clone copies the stock car, livery-paint paints it, and this tool adds what
 a DLC car needs. tools/manage-fh1-dlc.py installs the result beside the
 player's owned DLC.
 """
+import argparse
+import hashlib
+import json
+import shutil
 import sqlite3
+import sys
+import tempfile
+import time
 from pathlib import Path
 
+ROOT = Path(__file__).resolve().parents[1]
+ID_TABLE = ROOT / "config/livery-cars/ids.json"
+PANEL_TABLES = ROOT / "config/livery-cars/panels"
 TITLE_ID = 0x4D5309C9
 # Offers of the livery cars: the title's ID in the high half, "PS" and the car ID in the low half.
 OFFER_BASE = TITLE_ID << 32 | 0x50530000
 LICENSE_MASK = 1
 MARKETPLACE_IMAGE = "GAME:\\Media\\UI\\Textures\\UI4\\Marketplace\\Day1_{}.tga"   # on every disc
+PUBOFFER = b" \r\n"   # Media/<PubOfferingID>.puboffer: the title takes the offer from its name
 
 
 def _load_tool(name: str):
@@ -127,12 +138,28 @@ def member_order(name: str) -> list[tuple[int, str]]:
     return [(1, part.upper()) for part in parts[:-1]] + [(0, parts[-1].upper())]
 
 
-def livery_tables(tables: dict[str, tuple[int, str, bytes]], entries: list[tuple[int, str]]) -> dict[str, bytes]:
+def livery_tables(tables: dict[str, tuple[int, str, bytes]], entries: list[dict]) -> dict[str, bytes]:
     """Each language's Data_Car table (from Sources.string_tables, the livery packages left out)
     with every enabled livery car's names added. The title uses only the highest-priority copy of
-    each table, so every livery package carries the whole table."""
+    each table, so every livery package carries the whole table. `entries` are car-clone's string
+    entries: {"key", "text"}, or {"key", "same_as"} for a key holding another key's text in each
+    language (the stock car's short name), the English text where a language lacks it."""
     strings = _load_tool("fh1-strings")
-    return {lang: strings.replace_strings(data, dict(entries)) for lang, (_, _, data) in tables.items()}
+    english = next((data for lang, (_, _, data) in tables.items() if lang.upper() == "EN"), None)
+    fallback = dict(strings.parse(english)) if english else {}
+    out = {}
+    for lang, (_, _, data) in tables.items():
+        base, texts = dict(strings.parse(data)), {}
+        for entry in entries:
+            if "text" in entry:
+                texts[entry["key"]] = entry["text"]
+                continue
+            text = base.get(entry["same_as"], fallback.get(entry["same_as"]))
+            if text is None:
+                raise ValueError(f"no Data_Car table holds string {entry['same_as']}, the text of key {entry['key']}")
+            texts[entry["key"]] = text
+        out[lang] = strings.replace_strings(data, texts)
+    return out
 
 
 def string_files(tables: dict[str, bytes], car_id: int) -> dict[str, bytes]:
@@ -214,3 +241,120 @@ def content_header(package: str, display_name: str, mask: int = LICENSE_MASK) ->
     header[0x140:0x144] = TITLE_ID.to_bytes(4, "big")
     header[328:332] = mask.to_bytes(4, "little")
     return bytes(header)
+
+
+# -- package ----------------------------------------------------------------
+
+def livery_package_ids(id_table: Path = ID_TABLE) -> set[str]:
+    """The package IDs of every reserved livery car, whose string tables are rebuilt, never read."""
+    return {package_id(entry["id"]) for entry in json.loads(Path(id_table).read_text(encoding="utf-8"))["cars"]}
+
+
+def header_name(sources, db: sqlite3.Connection, stock_id: int, display: str) -> str:
+    """The package's display name, as Turn 10's read ("2013 Ford Shelby GT500 - Rockstar Energy"):
+    the stock car's year and English make before the livery car's name."""
+    row = db.execute("SELECT * FROM Data_Car WHERE Id=?", (stock_id,)).fetchone()
+    values = dict(zip(_columns(db, "Data_Car"), row or ()))
+    make, reference = None, values.get("MakeName")
+    if isinstance(reference, str) and reference.startswith("_&") and reference[2:].isdigit():
+        tables = sources.string_tables("list_carmake.str")
+        english = next((data for lang, (_, _, data) in tables.items() if lang.upper() == "EN"), None)
+        if english:
+            make = dict(_load_tool("fh1-strings").parse(english)).get(int(reference[2:]) & 0xFFFF)
+    return " ".join(str(part) for part in (values.get("Year"), make, display) if part)[:127]
+
+
+def build_package(recipe, sources, output: Path, *, id_table: Path = ID_TABLE, others=()) -> tuple[dict, bytes]:
+    """Build a livery car's package into `output` (the folder installed as 00000002/<package ID>)
+    and return its report and content header. The stock car is cloned (car-clone), painted
+    (livery-paint), given its package rows and thumbnail, and named in complete Data_Car tables
+    that also hold `others`, the string entries of the other enabled livery cars. `sources` is
+    only read; an existing output is refused, and a failed build leaves no output."""
+    started = time.perf_counter()
+    output = Path(output)
+    if output.exists():
+        raise ValueError(f"{output} already exists; choose a new output folder")
+    car, car_id = recipe.car, recipe.car["new_id"]
+    archive_tool = _load_tool("patch-fh1-archive")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    work = Path(tempfile.mkdtemp(prefix=f".{output.name}-", dir=output.parent))
+    try:
+        staged = work / "clone"
+        cloned = _load_tool("clone-fh1-car").clone_car(sources, car["stock_id"], car_id, car["media_name"],
+                                                       car["display_name"], staged, table=id_table)
+        painted = _load_tool("paint-fh1-livery").paint_livery(recipe, staged)
+        merge = staged / cloned["merge_database"]
+        db = sources.database()
+        try:
+            database, rows = package_rows(merge.read_bytes(), db, car, recipe.paint)
+            name = header_name(sources, db, car["stock_id"], car["display_name"])
+        finally:
+            db.close()
+        merge.write_bytes(database)
+        thumbnail = staged / f"media/UI/Textures/Thumbnails/Thumbnail_{car_id}.xds"
+        thumbnail.parent.mkdir(parents=True, exist_ok=True)
+        thumbnail.write_bytes(thumbnail_xds(stock_thumbnail(sources, car["stock_id"]), recipe.thumbnail))
+
+        members = sorted(((path.relative_to(staged).as_posix(), path.read_bytes())
+                          for path in staged.rglob("*") if path.is_file()), key=lambda member: member_order(member[0]))
+        tables = sources.string_tables("data_car.str", skip=livery_package_ids(id_table))
+        names = livery_tables(tables, cloned["strings"] + list(others))
+        files = {f"Media/{car_id}.puboffer": PUBOFFER,
+                 f"Media/DLCZips/{car_id}_pri_65.zip": archive_tool.write_archive(members)}
+        files |= {f"Media/DLCZips/{file}": data for file, data in string_files(names, car_id).items()}
+        package = work / "package"
+        for path, data in files.items():
+            (package / path).parent.mkdir(parents=True, exist_ok=True)
+            (package / path).write_bytes(data)
+        package.rename(output)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+    header = content_header(package_id(car_id), name)
+    return {
+        "package_id": package_id(car_id), "header_name": name,
+        "header_sha256": hashlib.sha256(header).hexdigest().upper(), "license_mask": f"{LICENSE_MASK:08X}",
+        "car": car, "offer": rows["offer"], "price": rows["price"], "paint": rows["paint"], "dropped": rows["dropped"],
+        "string_keys": cloned["strings"], "strings": {lang: label for lang, (_, label, _) in sorted(tables.items())},
+        "thumbnail": "recipe" if recipe.thumbnail else "stock",
+        "files": [{"path": path, "size": len(data), "sha256": hashlib.sha256(data).hexdigest().upper()}
+                  for path, data in sorted(files.items())],
+        "clone": cloned, "painted": painted, "seconds": round(time.perf_counter() - started, 1),
+    }, header
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    commands = parser.add_subparsers(dest="command", required=True)
+    build = commands.add_parser("build", help="build a livery car's package and header into a folder, for inspection")
+    build.add_argument("--recipe", type=Path, required=True)
+    build.add_argument("--state-root", type=Path, required=True, help="the installed preview state (.local/preview)")
+    build.add_argument("--game-root", type=Path, required=True, help="the extracted disc (.local/game/eur-base)")
+    build.add_argument("--output", type=Path, required=True,
+                       help="a folder receiving <package ID>/ and <package ID>.header")
+    build.add_argument("--art", type=Path, help="the recipe's art folder (default: .local/livery-art/<recipe name>)")
+    build.add_argument("--extractor", type=Path, help="archive extractor (default: the one the build made)")
+    build.add_argument("--panels", type=Path, default=PANEL_TABLES, help=argparse.SUPPRESS)
+    build.add_argument("--ids", type=Path, default=ID_TABLE, help=argparse.SUPPRESS)
+    args = parser.parse_args(argv)
+    try:
+        recipe = _load_tool("paint-fh1-livery").load_recipe(args.recipe, art_dir=args.art, panel_tables=args.panels,
+                                                            id_table=args.ids)
+        extractor = args.extractor or _load_tool("manage-fh1-dlc").default_extractor()
+        identifier = package_id(recipe.car["new_id"])
+        # A build never sees its own installed package, so an installed car can be built again.
+        sources = _load_tool("clone-fh1-car").Sources(args.state_root.absolute(), args.game_root.absolute(),
+                                                      extractor.resolve(), exclude={identifier})
+        header_path = args.output / f"{identifier}.header"
+        if header_path.exists():
+            raise ValueError(f"{header_path} already exists; choose a new output folder")
+        report, header = build_package(recipe, sources, args.output / identifier, id_table=args.ids)
+        header_path.write_bytes(header)
+    except (OSError, ValueError) as error:
+        print(str(error), file=sys.stderr)
+        return 1
+    print(json.dumps(report, indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

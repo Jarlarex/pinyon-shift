@@ -153,15 +153,23 @@ def read_zip(data: bytes) -> list[tuple[str, bytes]]:
 class StringTableTests(unittest.TestCase):
     BASE = {"EN": (2950, "PKG/StringTables_pri_2950.zip", clone_tests.string_table([(7451, "Pizza Hut"), (24056, "Car")])),
             "br": (0, "disc br.zip", clone_tests.string_table([(24056, "Carro")]))}
-    LIVERY = [(6002, "Car Rockstar"), (6003, "Car"), (6004, "Car Meguiar's"), (6005, "Car")]
+    # car-clone's entries: a display name, and a short name holding the stock car's in each language.
+    LIVERY = [{"key": 6002, "text": "Car Rockstar"}, {"key": 6003, "same_as": 24056},
+              {"key": 6004, "text": "Car Meguiar's"}, {"key": 6005, "same_as": 24056}]
 
     def test_every_language_keeps_its_base_entries_and_gains_the_livery_cars(self):
         tables = package.livery_tables(self.BASE, self.LIVERY)
         self.assertEqual(set(tables), {"EN", "br"})
         self.assertEqual(strings.parse(tables["EN"]), [(6002, "Car Rockstar"), (6003, "Car"), (6004, "Car Meguiar's"),
                                                        (6005, "Car"), (7451, "Pizza Hut"), (24056, "Car")])
-        self.assertEqual(dict(strings.parse(tables["br"]))[24056], "Carro")
-        self.assertEqual(dict(strings.parse(tables["br"]))[6004], "Car Meguiar's")
+        self.assertEqual({key: text for key, text in strings.parse(tables["br"]) if key in (6003, 6004, 24056)},
+                         {6003: "Carro", 6004: "Car Meguiar's", 24056: "Carro"})
+
+    def test_a_short_name_missing_from_a_language_takes_the_english_one(self):
+        base = self.BASE | {"DE": (0, "disc DE.zip", clone_tests.string_table([(1, "Anderes")]))}
+        self.assertEqual(dict(strings.parse(package.livery_tables(base, self.LIVERY)["DE"]))[6003], "Car")
+        with self.assertRaisesRegex(ValueError, "string 999"):
+            package.livery_tables(base, [{"key": 6003, "same_as": 999}])
 
     def test_the_string_files_are_shaped_like_turn_10s(self):
         files = package.string_files(package.livery_tables(self.BASE, self.LIVERY), 3001)
@@ -246,6 +254,169 @@ class ThumbnailTests(unittest.TestCase):
             self.assertEqual(package.stock_thumbnail(sources, 1557), b"thumb")
             with self.assertRaisesRegex(ValueError, "no thumbnail for car 1548"):
                 package.stock_thumbnail(sources, 1548)
+
+
+paint_tool = load("paint_fh1_livery_for_package", TOOLS / "paint-fh1-livery.py")
+paint_tests = load("test_paint_fh1_livery_for_package", Path(__file__).with_name("test_paint_fh1_livery.py"))
+STOCK_THUMBNAIL = ui_tests.make_xds(32, 8, 6, 2, bytes(range(256)) * 16, swizzle="ZYXW")
+MAKE = (0x3323 << 16) | 5
+
+
+class PackageSetup:
+    """car-clone's player files (stock car 1557 on the disc, an installed package with a complete
+    English table) with body textures, a thumbnail, a make name and a recipe for car 3001."""
+
+    def __init__(self, root: Path):
+        import json
+        self.root = root
+        self.files = clone_tests.CloneSetup(root)
+        db = game_database()
+        db.executescript(f"""ALTER TABLE Data_Car ADD COLUMN Year INTEGER; ALTER TABLE Data_Car ADD COLUMN MakeName TEXT;
+                             UPDATE Data_Car SET Year = 2012, MakeName = '_&{MAKE}' WHERE Id = 1557;""")
+        db.commit()
+        clone_tests.write_zip(self.files.state / "title-update-v4/media.zip", {"db/gamedb.slt": db.serialize()})
+        db.close()
+        english = [(6002, "Taken"), (23100, "Challenger '12"), (24056, "Challenger")]
+        clone_tests.write_zip(self.files.state / clone_tests.TITLE / "00000002/PKG/Media/DLCZips/StringTables_pri_2950.zip",
+                              {"EN/Data_Car.str": clone_tests.string_table(english)})
+        clone_tests.write_zip(self.files.game / "media/cars/DOD_Car_12.zip", {
+            "DOD_Car_12.carbin": b"stock model", "damage.xds": b"scratches",
+            "nodamage.xds": paint_tests.body_texture(16), "nodamage_LOD0.xds": paint_tests.body_texture(32)})
+        clone_tests.write_zip(self.files.game / "media/StringTables/EN.zip", {
+            "Data_Car.str": clone_tests.string_table(english[1:]), "List_CarMake.str": clone_tests.string_table([(5, "Dodge")])})
+        clone_tests.write_zip(self.files.game / "media/ui/Textures.zip", {"Thumbnails/Thumbnail_1557.xds": STOCK_THUMBNAIL})
+        self.panels = root / "panels"
+        self.panels.mkdir()
+        (self.panels / "DOD_Car_12.json").write_text(json.dumps(paint_tests.table(paint_tests.PANELS)), encoding="utf-8")
+        self.recipe_path = root / "test-livery.json"
+        self.recipe_path.write_text(json.dumps({
+            "schema_version": 1, "car": {**CAR, "display_name": "Car Rockstar"}, "paint": {"rgb": "8C0001"},
+            "layers": [{"fill": "8C0001", "panels": "all"}, {"band": "F2D500", "panel": "left", "u": [0, 1], "v": [0.4, 0.6]}]}))
+        self.output = root / "out" / "package"
+
+    def recipe(self):
+        return paint_tool.load_recipe(self.recipe_path, art_dir=self.root / "art", panel_tables=self.panels,
+                                      id_table=self.files.ids)
+
+    def sources(self):
+        return clone.Sources(self.files.state, self.files.game, Path("extractor.exe"))
+
+    def build(self, output=None, **options):
+        return package.build_package(self.recipe(), self.sources(), output or self.output, id_table=self.files.ids,
+                                     **options)
+
+
+class BuildPackageTests(unittest.TestCase):
+    def setUp(self):
+        import tempfile
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.setup = PackageSetup(Path(self.temporary.name))
+
+    def tree(self, root):
+        return {p.relative_to(root).as_posix(): p.read_bytes() for p in sorted(root.rglob("*")) if p.is_file()}
+
+    def members(self, name):
+        return dict(read_zip(self.tree(self.setup.output)[name]))
+
+    def test_the_package_has_the_layout_of_turn_10s_livery_cars(self):
+        report, header = self.setup.build()
+        tree = self.tree(self.setup.output)
+        self.assertEqual(sorted(tree), ["Media/3001.puboffer", "Media/DLCZips/3001_pri_65.zip",
+                                        "Media/DLCZips/StringTables_pri_3001.zip", "Media/DLCZips/stringtables.xml",
+                                        "Media/DLCZips/zipmount.xml"])
+        self.assertEqual(tree["Media/3001.puboffer"], b" \r\n")
+        self.assertEqual([name for name, _ in read_zip(tree["Media/DLCZips/3001_pri_65.zip"])], [
+            "media/audio/cars/CarModelTuning/DOD_Car_RSE_12_CMT.xml",
+            "media/audio/cars/Engines/EngineTuning/DOD_Car_RSE_12_ET.xml",
+            "media/cars/DOD_Car_RSE_12/damage.xds", "media/cars/DOD_Car_RSE_12/DOD_Car_RSE_12.carbin",
+            "media/cars/DOD_Car_RSE_12/nodamage.xds", "media/cars/DOD_Car_RSE_12/nodamage_LOD0.xds",
+            "media/db/patch/3001000_merge.slt", "media/UI/Textures/Thumbnails/Thumbnail_3001.xds"])
+        self.assertEqual(header, package.content_header(package.package_id(3001), "2012 Dodge Car Rockstar"))
+        self.assertEqual(report["package_id"], package.package_id(3001))
+        self.assertEqual(report["header_name"], "2012 Dodge Car Rockstar")
+        self.assertEqual(report["header_sha256"], __import__("hashlib").sha256(header).hexdigest().upper())
+        self.assertEqual({entry["path"] for entry in report["files"]}, set(tree))
+
+    def test_the_car_is_painted_offered_and_named(self):
+        report, _ = self.setup.build()
+        car = self.members("Media/DLCZips/3001_pri_65.zip")
+        self.assertNotEqual(car["media/cars/DOD_Car_RSE_12/nodamage.xds"], paint_tests.body_texture(16))
+        self.assertEqual(car["media/UI/Textures/Thumbnails/Thumbnail_3001.xds"], STOCK_THUMBNAIL)
+        merge = car["media/db/patch/3001000_merge.slt"]
+        self.assertEqual(rows_of(merge, "SELECT RGB FROM Combo_Colors"), [(0x8C0001,)])
+        self.assertEqual(rows_of(merge, "SELECT ContentId FROM ContentOffersMapping"), [(3001,)])
+        self.assertEqual(report["offer"]["offer_id"], "4D5309C950530BB9")
+        names = dict(strings.parse(self.members("Media/DLCZips/StringTables_pri_3001.zip")["EN/Data_Car.str"]))
+        self.assertEqual(names, {6002: "Taken", 6003: "Car Rockstar", 6004: "Challenger '12", 23100: "Challenger '12",
+                                 24056: "Challenger"})
+        self.assertEqual(report["strings"], {"EN": "PKG/StringTables_pri_2950.zip"})
+        self.assertEqual(report["string_keys"], [{"field": "DisplayName", "key": 6003, "text": "Car Rockstar"},
+                                                 {"field": "ModelShort", "key": 6004, "same_as": 23100}])
+
+    def test_other_livery_cars_names_join_the_tables(self):
+        self.setup.build(others=[{"key": 6100, "text": "Other livery car"}])
+        names = dict(strings.parse(self.members("Media/DLCZips/StringTables_pri_3001.zip")["EN/Data_Car.str"]))
+        self.assertEqual(names[6100], "Other livery car")
+
+    def test_a_recipe_thumbnail_replaces_the_stock_one(self):
+        import dataclasses
+        art = (32, 8, bytes(range(256)) * 4)
+        recipe = dataclasses.replace(self.setup.recipe(), thumbnail=art)
+        package.build_package(recipe, self.setup.sources(), self.setup.output, id_table=self.setup.files.ids)
+        thumbnail = self.members("Media/DLCZips/3001_pri_65.zip")["media/UI/Textures/Thumbnails/Thumbnail_3001.xds"]
+        self.assertEqual(ui.decode_xds(thumbnail)[1], art[2])
+
+    def test_equal_inputs_give_equal_packages(self):
+        first, header = self.setup.build()
+        second, again = self.setup.build(self.setup.output.with_name("again"))
+        self.assertEqual(self.tree(self.setup.output), self.tree(self.setup.output.with_name("again")))
+        self.assertEqual(header, again)
+
+    def test_the_build_changes_no_source_file(self):
+        before = self.setup.files.hashes()
+        self.setup.build()
+        self.assertEqual(self.setup.files.hashes(), before)
+
+    def test_an_existing_output_or_a_failed_build_leaves_nothing_behind(self):
+        self.setup.output.mkdir(parents=True)
+        with self.assertRaisesRegex(ValueError, "already exists"):
+            self.setup.build()
+        self.setup.output.rmdir()
+        (self.setup.files.game / "media/ui/Textures.zip").unlink()
+        with self.assertRaisesRegex(ValueError, "no thumbnail for car 1557"):
+            self.setup.build()
+        self.assertEqual(list(self.setup.output.parent.iterdir()), [])
+
+    def test_the_build_command_writes_the_tree_and_its_header(self):
+        import io
+        import json
+        from contextlib import redirect_stderr, redirect_stdout
+        out, err, folder = io.StringIO(), io.StringIO(), self.setup.root / "built"
+        args = ["build", "--recipe", self.setup.recipe_path, "--state-root", self.setup.files.state,
+                "--game-root", self.setup.files.game, "--output", folder, "--art", self.setup.root / "art",
+                "--panels", self.setup.panels, "--ids", self.setup.files.ids, "--extractor", self.setup.root / "x.exe"]
+        with redirect_stdout(out), redirect_stderr(err):
+            self.assertEqual(package.main([str(arg) for arg in args]), 0, err.getvalue())
+        pid = package.package_id(3001)
+        self.assertEqual(json.loads(out.getvalue())["package_id"], pid)
+        self.assertTrue((folder / pid / "Media/3001.puboffer").is_file())
+        self.assertEqual(len((folder / f"{pid}.header").read_bytes()), 332)
+        with redirect_stdout(io.StringIO()), redirect_stderr(err):
+            self.assertEqual(package.main([str(arg) for arg in args]), 1)
+        self.assertIn("already exists", err.getvalue())
+
+
+class CommittedTestRecipeTests(unittest.TestCase):
+    def test_the_in_game_test_recipes_load_without_art(self):
+        recipes = sorted((TOOLS.parent / "config/livery-cars/tests").glob("*.json"))
+        self.assertEqual([path.name for path in recipes], ["challenger-test.json", "fiesta-orientation.json"])
+        for path in recipes:
+            with self.subTest(recipe=path.name):
+                recipe = paint_tool.load_recipe(path)
+                self.assertEqual(recipe.art, {})
+                self.assertIsNone(recipe.thumbnail)
+                self.assertEqual(set(recipe.panels), {"left", "right", "top", "front", "rear"})
 
 
 if __name__ == "__main__":
