@@ -9,13 +9,17 @@ config/render-tests/fh1-promo-<recipe>-<kind>.fh1test for each kind:
   showroom  the car's showroom, the camera orbiting it and then raised
   buy       buy it for credits, return to free roam and drive it
   reload    from the state a buy run left: drive it again
-  garage    from that state: fast travel to Dak's Garage, auto-upgrade it, open its paint menu
+  garage    from that state: fast travel to Dak's Garage, auto-upgrade it, drive it
+  paint     from that state: fast travel to the Paint Shop, repaint it, drive it
+  paint-clear  from the state a paint run left: Clear Design, drive it
 
 Every route logs the native DLC trace for the car and its stock car. The
 routes run from a render seed of the .local/preview save, which spawns at
 Dak's Garage with enough credits, with the car installed by
-`manage-fh1-dlc.py install-livery`; reload and garage run from the private
-state folder (<output>.state) a buy run leaves.
+`manage-fh1-dlc.py install-livery`; reload, garage and paint run from the
+private state folder (<output>.state) a buy run leaves, paint-clear from the
+one a paint run leaves. The Paint Shop's editor shows every car in its paint
+colour; a saved repaint replaces a livery, and Clear Design brings it back.
 """
 import argparse
 import importlib.util
@@ -24,7 +28,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 HEADER = "pinyon-shift-fh1-render-test-v1"
-KINDS = ("list", "showroom", "buy", "reload", "garage")
+KINDS = ("list", "showroom", "buy", "reload", "garage", "paint", "paint-clear")
 # Steps are written relative to free roam (frame 1700) and shifted by this much, since load times vary;
 # a wait's limit gets the same allowance.
 SETTLE = 600
@@ -141,6 +145,76 @@ def reload_steps() -> list:
     return steps
 
 
+# From outside the Autoshow, where a buy run leaves the player, the pause map's cursor is nudged onto a
+# festival-hub icon: the hub's icons sit close together and the cursor snaps to the nearest one.
+DAKS_GARAGE = (-20000, -10000)
+PAINT_SHOP = (-20000, -15000)
+DOWN = "0002"
+
+
+def _fast_travel(steps: list, nudge: tuple[int, int], label: str) -> None:
+    """Pause, MAP, the cursor nudged onto a hub icon (captured with its label), Y fast travel, A."""
+    steps += [["press", 1750, START], ["press", 2000, A],
+              ["input", 2420, "0000", 0, 0, *nudge], ["input", 2435, "0000", 0, 0, 0, 0],
+              ["capture", 2480, f"map-{label}"], ["press", 2500, Y], ["press", 2650, A],
+              ["captures", 2700, 4200, 500, "travel-"]]
+
+
+def garage_steps() -> list:
+    """Dak's Garage: X opens the garage; Auto Upgrade, A on its explanation, A on the first class offered
+    (the top of the car's own class), A to buy and install the parts; the title saves; B and A leave the
+    garage; then the car is driven."""
+    steps = []
+    _fast_travel(steps, DAKS_GARAGE, "garage")
+    steps += [["press", 4250, X], ["capture", 4600, "garage-menu"], ["press", 4650, A],
+              ["capture", 5300, "auto-upgrade"], ["press", 5350, A], ["capture", 5420, "classes"],
+              ["press", 5450, A], ["capture", 6300, "install"], ["press", 6350, A],
+              ["captures", 6400, 7000, 300, "installed-"], ["press", 7050, "2000"], ["capture", 7300, "leave-prompt"],
+              ["press", 7350, A]]
+    frame = drive_and_look(steps, 7800)
+    steps.append(["stop", frame + 30])
+    return steps
+
+
+def _leave_paint_shop(steps: list, frame: int) -> int:
+    """B to the Design Creator menu, B to the Paint Shop menu, B and A leave the Paint Shop."""
+    steps += [["press", frame, "2000"], ["press", frame + 300, "2000"], ["press", frame + 600, "2000"],
+              ["capture", frame + 850, "leave-prompt"], ["press", frame + 900, A]]
+    return frame + 1850
+
+
+def paint_steps() -> list:
+    """The Paint Shop: X, Design Creator, Paint Car, Paint Body; a colour five steps to the right, A;
+    Start saves, A to the current car; the Paint Shop is left and the car driven."""
+    steps = []
+    _fast_travel(steps, PAINT_SHOP, "paint")
+    steps += [["press", 4250, X], ["capture", 4600, "paint-menu"], ["press", 4650, A], ["capture", 5500, "creator"],
+              ["press", 5550, A], ["capture", 6400, "paint-car"], ["press", 6450, A], ["capture", 7300, "colours"]]
+    for n in range(5):
+        steps.append(["press", 7400 + 25 * n, RIGHT])
+    steps += [["capture", 7600, "colour"], ["press", 7650, A], ["capture", 7900, "applied"],
+              ["press", 7950, START], ["capture", 8200, "save"], ["press", 8250, A], ["capture", 8700, "saved"]]
+    frame = drive_and_look(steps, _leave_paint_shop(steps, 8950))
+    steps.append(["stop", frame + 30])
+    return steps
+
+
+def paint_clear_steps() -> list:
+    """From the Paint Shop where the paint run leaves the player: X, Design Creator, down five times to
+    Clear Design, A, A to erase the paint and decals; the Paint Shop is left and the car driven."""
+    steps = [["capture", 1750, "spawn"], ["press", 1800, X], ["capture", 2150, "paint-menu"], ["press", 2200, A],
+             ["capture", 2650, "creator"]]
+    for n in range(5):
+        steps.append(["press", 2700 + 25 * n, DOWN])
+    steps += [["capture", 2850, "clear-design"], ["press", 2900, A], ["capture", 3100, "erase-prompt"],
+              ["press", 3150, A], ["capture", 3700, "erased"]]
+    # From the Design Creator menu one B fewer reaches the Paint Shop menu.
+    steps += [["press", 3850, "2000"], ["press", 4150, "2000"], ["capture", 4400, "leave-prompt"], ["press", 4450, A]]
+    frame = drive_and_look(steps, 5400)
+    steps.append(["stop", frame + 30])
+    return steps
+
+
 # -- routes -----------------------------------------------------------------
 
 def _shifted(step: list) -> list:
@@ -217,6 +291,29 @@ def routes(recipe, make_presses: int, car_presses: int, kinds=KINDS[:4], cards: 
                    [f"{title} reload the save the buy route left and drive the car again.", after_buy, *trace,
                     "# The player spawns outside the Autoshow in the car; the throttle is held until it has moved "
                     "15 m, then the camera turns to each side."]),
+    }
+    paint_note = ("# The Paint Shop's editor makes the renderer log draw failures (PM4_DRAW_INDX_2 ... Failed in "
+                  "backend), which fail the runner's renderer-log check; the captures are complete.")
+    builders |= {
+        "garage": (garage_steps,
+                   [f"{title} auto-upgrade it at Dak's Garage and drive it.", after_buy, *trace,
+                    "# Pause, MAP, the cursor nudged onto Dak's Garage (map-garage shows its label), Y fast travel, "
+                    "A; X opens the garage; Auto Upgrade, A on its explanation, A on the first class offered, A to "
+                    "buy and install the parts (the title saves); B and A leave the garage. The HUD then shows the "
+                    "new PI; the throttle is held until the car has moved 15 m and the camera turns to each side."]),
+        "paint": (paint_steps,
+                  [f"{title} repaint it at the Paint Shop and drive it.", after_buy, *trace,
+                   "# Pause, MAP, the cursor nudged onto the Paint Shop (map-paint), Y fast travel, A; X; Design "
+                   "Creator, Paint Car, Paint Body; a colour five steps right, A; Start saves, A to the current car; "
+                   "B three times and A leave the Paint Shop; then the car is driven. A saved repaint replaces the "
+                   "livery. The run's .state folder seeds paint-clear.", paint_note]),
+        "paint-clear": (paint_clear_steps,
+                        [f"{title} clear the repaint at the Paint Shop, which brings the livery back.",
+                         f"# Seed: the private state folder a run of fh1-promo-{recipe.name}-paint left (<output>.state).",
+                         *trace,
+                         "# X at the Paint Shop; Design Creator, down five times to Clear Design, A, A to erase the "
+                         "paint and decals (the title saves); B twice and A leave the Paint Shop; then the car is "
+                         "driven.", paint_note]),
     }
     unknown = sorted(set(kinds) - set(builders))
     if unknown:

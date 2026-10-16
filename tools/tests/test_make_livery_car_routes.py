@@ -30,7 +30,7 @@ def steps(text: str) -> list[str]:
 class RouteGeneratorTests(unittest.TestCase):
     def setUp(self):
         self.recipe = paint.load_recipe(TEST_RECIPE, require_art=False)
-        self.routes = generator.routes(self.recipe, 14, 4, kinds=("list", "showroom", "buy", "reload"))
+        self.routes = generator.routes(self.recipe, 14, 4, kinds=generator.KINDS)
 
     def route(self, kind):
         return self.routes[f"fh1-promo-challenger-test-{kind}.fh1test"]
@@ -63,6 +63,12 @@ class RouteGeneratorTests(unittest.TestCase):
                 self.assertIn("# dlc-car-trace\n# dlc-car-ids 3001,1557\n", text)
                 self.assertIn("recipe challenger-test", text)
                 self.assertFalse({c for c in text if ord(c) < 32 and c != "\n"})
+
+    def test_the_garage_and_paint_routes_travel_to_their_hub_icons(self):
+        self.assertIn("input 3020 0000 0 0 -20000 -10000 0 0", steps(self.route("garage")))
+        self.assertIn("input 3020 0000 0 0 -20000 -15000 0 0", steps(self.route("paint")))
+        for kind in ("paint", "paint-clear"):
+            self.assertIn("renderer-log check", self.route(kind))
 
     def test_the_list_captures_the_cards_asked_for(self):
         listed = generator.routes(self.recipe, 17, 0, kinds=("list",), cards=5)["fh1-promo-challenger-test-list.fh1test"]

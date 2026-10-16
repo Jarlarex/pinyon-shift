@@ -14,7 +14,7 @@ No game files, generated cars or livery art are committed; livery art lives in
 | `car-clone` | `tools/clone-fh1-car.py` | done (sources, rows, names, files, CLI; car IDs in `config/livery-cars/ids.json`) |
 | `livery-paint` | `tools/paint-fh1-livery.py` | built (repaint, panel tables for six cars, recipes, `paint`, `panels`, probe checked in game on five cars); the player check is open |
 | `livery-package` | `tools/package-fh1-livery.py`, `tools/manage-fh1-dlc.py` | in progress (package build, `install-livery`, names refresh; the title mounts the package and lists the car) |
-| `promo-cars` | — | planned |
+| `promo-cars` | `tools/make-livery-car-routes.py`, `package-fh1-livery.py thumbnail` | in progress (tooling; the seven cars wait for references and art) |
 
 ## Car textures (`tools/fh1_xds.py`)
 
@@ -312,3 +312,50 @@ used in private render seeds only.
 | 2026-10-16 | Spec criterion 7 in game: `fh1-livery-car-buy` from the seed with car 3001 installed by `install-livery`, then `fh1-livery-car-reload` from that run's private state | the showroom offers the car for **45,000 Cr or 2 Tokens**; bought for credits, the title saves and renders its garage thumbnail, and "return to free roam" puts the player in car 3001 outside the Autoshow. Driven, its livery shows from behind, from both sides and from above (the yellow stripe over roof and trunk, the green band and the red block at each side's front-top). The reload starts outside the Autoshow **in car 3001, livery intact**, and drives it again. Both runs: offer installed, purchased, visible; rows installed, purchased, selectable, drivable; no error events. The garage menu itself was not opened |
 | 2026-10-16 | Spec criterion 8 in game: `install-livery` of `tests/fiesta-orientation.json` (car 3006) into the same seed beside car 3001, then `fh1-livery-car-fiesta` | installed in 59 s; both livery packages' tables now hold both cars' names (the refresh after the install). The clone (`IsUnicorn` 0) is **listed** in the Ford list as "Fiesta Zetec S Orientation Test" (2009 Ford, D 229, 19,000 Cr, NEW) where the stock Fiesta is not. In the showroom every panel reads as on the other five cars: the left side green and the right side blue, each with white front-top, black rear-top, magenta front-bottom and cyan rear-bottom; the hood white on the car's left and magenta on its right; the nose and the rear bumper white and magenta on the car's left, black and cyan on its right. The Fiesta's panel table needs no change (livery-paint criterion 2 met for all six cars) |
 | 2026-10-16 | Spec criterion 9: a copy of the state `fh1-livery-car-buy` left, with car 3001's package disabled by `manage-fh1-dlc.py disable`; `fh1-livery-car-disable` loads it and saves by buying the F100; then `enable` and `fh1-livery-car-owned` from that run's state; the baseline is `fh1-livery-car-owned` from the buy run's state | with the package off the save **loads**: the title has no rows for car 3001 (the trace lists only the stock Challenger) and puts the player in another owned car, a Volkswagen Corrado VR6, outside the Autoshow; buying the F100 (26,000 Cr) saves. After `enable` the reload spawns in the F100 (99,874,000 Cr) and car 3001's Autoshow card still shows the **garage icon of an owned car**, as in the baseline (an unowned new car's card says NEW). The title keeps a bought livery car while its package is off, so `disable` needs no guard; the car the player sat in is not restored |
+
+## The promotional cars (`promo-cars`)
+
+Each car is a committed recipe, `config/livery-cars/<recipe>.json`, with its
+local material in `.local/livery-art/<recipe>/`: the reference screenshots
+(`reference/`), the art brief, the art PNGs and the thumbnail. None of it is
+committed. CI checks every committed recipe without its art
+(`load_recipe(..., require_art=False)`: car, IDs, panels, layer settings and
+file names); the art is checked when a car is built.
+
+```powershell
+# Routes for one car at its place in the Autoshow (presses right to its make, then to its card)
+python tools\make-livery-car-routes.py --recipe config\livery-cars\<recipe>.json `
+    --make-presses 14 --car-presses 4 [--kinds list,showroom,buy,reload,garage,paint,paint-clear]
+# The garage thumbnail the title rendered when the car was bought, as the recipe's thumbnail art
+python tools\package-fh1-livery.py thumbnail --xdc <run>.state\user\...\Thumbnails\Thumbnail_<n>.xdc `
+    --output .local\livery-art\<recipe>\thumbnail.png
+```
+
+The routes (`fh1-promo-<recipe>-<kind>`) share livery-package's steps and
+timing: `list`, `showroom` and `buy` run from a render seed with the car
+installed; `reload`, `garage` and `paint` from the state a buy run leaves;
+`paint-clear` from the one a paint run leaves. From outside the Autoshow the
+pause map's cursor is nudged onto a festival-hub icon, whose icons sit close
+together: (-20000, -10000) for 15 frames reaches Dak's Garage, (-20000, -15000)
+the Paint Shop.
+
+When a car is bought the title renders its garage thumbnail into the profile,
+`Thumbnails/Thumbnail_<n>.xdc`: a `cxds` container (magic, version 2, the
+unpacked size, then chunks of raw deflate) around exactly an Autoshow
+thumbnail, header included, showing the car with its livery. Converted, it is
+the recipe's `thumbnail` and the car's Autoshow card shows its livery.
+
+The Paint Shop's editor shows every car in its paint colour, without the
+livery. A repaint saved to the car replaces the livery in game; Clear Design
+(erase paint and decals) brings it back. The editor also makes the renderer
+log draw failures (`PM4_DRAW_INDX_2(3, 8, 2): Failed in backend`), so the
+`paint` and `paint-clear` runs fail the runner's renderer-log check with
+complete captures.
+
+### Evidence
+
+| Date | Check | Result |
+|---|---|---|
+| 2026-10-16 | `thumbnail` on the `Thumbnail_45.xdc` the title rendered when `fh1-livery-car-buy` bought car 3001 | a 768×288 PNG of the car with its test livery (a three-quarter and a rotated side view on white); written into the stock Challenger thumbnail through the recipe path it re-encodes to the game's texture **byte for byte** |
+| 2026-10-16 | `make-livery-car-routes.py` for `tests/challenger-test.json` at (14, 4) | the `showroom` and `reload` steps equal the committed `fh1-livery-car-*` routes'; the `buy` steps equal them without the showroom save wait, which held for car 3001 but timed out for the F100 |
+| 2026-10-16 | Generated `garage`, `paint` and `paint-clear` routes for car 3001 from the state `fh1-livery-car-buy` left (paint-clear from the paint run's) | `garage` **passes**: fast travel to Dak's Garage, Auto Upgrade to the top of class A (**A 507 → A 599**, 1,887 → 1,678 kg, 470 → 555 HP, 66,882 Cr), the title saves, and the car drives out with its livery. `paint`: in the editor the car shows its paint colour; a dark green saved to the car **replaces the livery** in free roam. `paint-clear`: Clear Design erases paint and decals and the car drives out **with its livery again**. Both paint runs fail only the renderer-log check, from the editor's draw failures |
