@@ -12,8 +12,9 @@ No game files, generated cars or livery art are committed; livery art lives in
 |---|---|---|
 | `xds-codec` | `tools/fh1_xds.py` | done (layout, read/write, decode, encode, in-game check) |
 | `car-clone` | `tools/clone-fh1-car.py` | done (sources, rows, names, files, CLI; car IDs in `config/livery-cars/ids.json`) |
-| `livery-paint` | `tools/paint-fh1-livery.py` | in progress (repaint, panel geometry, recipes, `paint`) |
-| `livery-package`, `promo-cars` | — | planned |
+| `livery-paint` | `tools/paint-fh1-livery.py` | built (repaint, panel tables for six cars, recipes, `paint`, `panels`, probe checked in game on five cars); the player check is open |
+| `livery-package` | `tools/package-fh1-livery.py`, `tools/manage-fh1-dlc.py` | in progress (package build; the title mounts it and lists the car) |
+| `promo-cars` | — | planned |
 
 ## Car textures (`tools/fh1_xds.py`)
 
@@ -216,3 +217,59 @@ outside, so art reads as drawn on every panel; `mirror` flips it on purpose.
 | 2026-10-11 | `panels` coverage of the six committed tables (spec criterion 1) | outlines inside the paint area of both textures: **99.03–100%** (worst: the Lancer's left side); scratches covered: **92.4–98.5%**; Challenger stripe lanes on panels: **100% on `top`, `front`, `rear`** (80% of all lane texels lie on panels; the rest are Turn 10's bleed past the panel ends and two colour swatches) |
 | 2026-10-11 | Probe in game, Autoshow showroom, from a render seed of `.local/preview` (modded profile), for the Challenger, FR-S, Murciélago, Lancer and RUF; the Autoshow shows the Challenger in a stock stripe variant, so the probe paints every `nodamage*` variant | First pass (each panel's own colour) showed the side tables swapped and the upper side panel upside down; the quadrant patches then showed the top mirrored across the car's centreline and every front fascia mirrored. After the fixes all five read correctly from every side (confirmation pass: on each car the sides, hood, nose and tail show white at the front-top, black at the rear-top, magenta at the front-bottom and cyan at the rear-bottom as seen from outside; on the hood white is on the car's left, and on the nose and tail white is on the car's left). The Fiesta is a Unicorn car (`IsUnicorn = 1`) and is not in the Autoshow; a mod database patch does not reach the v4 database, so its table, laid out like the other five, is first seen in game by `livery-package` |
 | 2026-10-11 | Spec open question 1: one Challenger panel painted in the probe colour but with its stock alpha 0 (`--alpha0-panel rear`), on the stock car (`HasRaceLivery = 0`) | in game the panel shows the **stock paint (white)**, not the probe colour, and not a mix: on a car without `HasRaceLivery` the paint colour replaces the paint area's texture colour entirely. Only stock-opaque texels inside the outline showed the probe colour. A livery therefore needs `HasRaceLivery = 1`, which `car-clone` sets; how it shows on such a car is `livery-package`'s first in-game check |
+
+## Packaging a livery car (`tools/package-fh1-livery.py`)
+
+A livery car ships the way Turn 10 shipped its own, the Shelby GT500 Rockstar
+Energy (1606) and the Pizza Hut Mustang (1686): as a DLC package whose licence
+owns the car's offer. `build_package` clones the stock car, paints the recipe
+and adds what a DLC car needs:
+
+- **Rows** in the clone's merge database: the recipe's price (`price: null`
+  keeps the stock car's `BaseCost`), `IsUnicorn` 0 (the stock Fiesta is a
+  Unicorn car, which keeps it out of the Autoshow), one `Combo_Colors` row in
+  the recipe's paint colour (the clone's stripe and colour variants, which would
+  replace the livery, are dropped with their `Combo_Colors_Exceptions` and
+  `StripeColors` rows), and a hidden `ContentOffers` row (`PubOfferingID` = the
+  car ID, `LicenseMask` 1, `OfferId` `0x4D5309C9_5053_0000` + the car ID) with
+  its `ContentOffersMapping` (ID 10 × the car ID).
+- **Names**: the title uses only the highest-priority copy of each language's
+  `Data_Car.str`, so each Turn 10 package ships the whole table. A livery
+  package does the same at priority = its car ID (above Turn 10's highest,
+  2950): each language's winning installed table plus every enabled livery
+  car's two entries (the short name is the stock car's, per language).
+- **Thumbnail**: `Thumbnail_<id>.xds` is a ready-made 768×288 uncompressed
+  texture (a three-quarter view beside a rotated side view, from Turn 10's
+  offline renderer). The stock car's comes from the disc's
+  `media/ui/Textures.zip`, unless the recipe names a 768×288 PNG as
+  `"thumbnail"`.
+- **Files**: `Media/<id>.puboffer` (the title takes the offer from its name),
+  `Media/DLCZips/<id>_pri_65.zip` (the car, its audio tuning, the merge
+  database and the thumbnail), `StringTables_pri_<id>.zip`, `stringtables.xml`
+  and `zipmount.xml`. Archives are written by `patch-fh1-archive.write_archive`:
+  stored members in Turn 10's order (files before folders, names compared in
+  upper case), with extra field `0x1123` holding each member's data offset,
+  which the title reads.
+- **Header**: the 332-byte content header the SDK keeps beside an installed
+  package, with licence mask `00000001` at byte 328, named
+  `<year> <make> <car name>`. The package ID is fixed per car ID.
+
+```powershell
+# A package tree and header for inspection (writes nothing in a state root)
+python tools\package-fh1-livery.py build --recipe config\livery-cars\tests\challenger-test.json `
+    --state-root .local\preview --game-root .local\game\eur-base --output <dir>
+```
+
+`config/livery-cars/tests/` holds two recipes for the in-game checks, fills
+and bands only: a Challenger test livery (car 3001) and a Fiesta orientation
+livery (car 3006) that draws the probe's quadrant patches in colour. They are
+used in private render seeds only.
+
+### Evidence
+
+| Date | Check | Result |
+|---|---|---|
+| 2026-10-16 | `build` of `tests/challenger-test.json` from the player's files, twice | **58 s and 59 s** (painting 22 s of it; spec: 5 min); the two trees and headers **byte-identical**; a 64.5 MB car archive of 69 members, names in 23 languages (from the Pizza Hut's table at 2950 and the Shelby's at 1450), every base entry kept |
+| 2026-10-16 | Built package against the installed Pizza Hut and Shelby packages (spec criterion 2) | the **Shelby's file layout** (the Pizza Hut adds a cameras zip and loose audio folders); headers of the same layout and mask `00000001` (headers built for the Pizza Hut and Shelby equal theirs byte for byte); every member's `0x1123` offset right, zip versions as Turn 10's (1.0, no flags), stored members where theirs are LZX; 48 merge tables like the Shelby's, one `Combo_Colors` row, a hidden offer shaped like the Shelby's, `Data_Car`, `ContentOffers` and `Combo_Colors` columns equal to the Pizza Hut's; the car's flags as both Turn 10 cars (`HasRaceLivery` 1, `ContentId` 99, purchased, installed, selectable) |
+| 2026-10-16 | In game, EU v4 build: the built package placed by hand in a private seed of `.local/preview` (no mods), the Autoshow's Dodge list, with the native DLC trace (`# dlc-car-trace`, `# dlc-car-ids 3001,1557`) | the title mounts the package: `dlc.content_entitlement` for car 3001 **installed 1, purchased 1, visible 1** (as the Pizza Hut's and Shelby's), `dlc.car_database` **installed, purchased, selectable, drivable** with the stock Challenger's upgrade counts (5 tyre, 5 suspension, 1 engine). Dodge shows a NEW badge; the list holds **"Challenger SRT8 392 Livery Test"** (2012 Dodge, A 507, **45,000 Cr**) with the stock thumbnail and a NEW tag, after the stock Challenger, which is still listed; other DLC cars keep their names (the full table works) |
+| 2026-10-16 | The same seed: car 3001's showroom, orbit and raised captures | the **livery renders as painted**: the dark body, the yellow stripe over the hood, roof, nose and tail, the green band low on each side and the red block at each side's front-top. The bright yellow on a car whose paint colour is near-black shows that with `HasRaceLivery` 1 the paint area shows its texture colour as is, not blended with the paint colour (livery-paint open question 1). The showroom offers the car for 45,000 Cr or 2 Tokens |
