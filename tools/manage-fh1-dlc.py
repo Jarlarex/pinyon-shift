@@ -22,6 +22,8 @@ PACKAGE_ID = re.compile(r"[0-9A-F]{1,42}\Z")
 MAGIC = (b"LIVE", b"PIRS", b"CON ")
 MAX_PACKAGE = 2 * 1024**3
 RALLY = "6F6992766050D818245ADD408031E280FB5F4E634D"
+GENERATED = "generated"   # import records of livery packages built by install-livery
+LIVERY_MASK = "00000001"
 
 
 def long_path(path: Path) -> Path:
@@ -247,6 +249,21 @@ def mutation_lock(state: Path):
                 msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
 
 
+def verified_livery(content: Path, header: Path, record: dict) -> dict:
+    """A generated livery package is checked against the record its build wrote, since its payload
+    comes from the player's own disc and DLC and no catalog can hold its hash. Its licence owns only
+    its own offer (mask 00000001), never more."""
+    data = header.read_bytes()
+    if (len(data) != 332 or record.get("header_sha256") != hashlib.sha256(data).hexdigest().upper() or
+            record.get("license_mask") != LIVERY_MASK or int.from_bytes(data[328:332], "little") != int(LIVERY_MASK, 16)):
+        raise ValueError("content header or licence changed; build the livery car again")
+    _, digest = payload_catalog(content)
+    if record.get("payload_sha256") != digest:
+        raise ValueError("installed content is incomplete or changed; build the livery car again")
+    return dict(package_id=record["package_id"], display_name=record.get("display_name", record["package_id"]),
+                kind=GENERATED)
+
+
 def verified_content(state: Path, id: str, *, require_enabled: bool = False) -> tuple[Path, dict, dict]:
     """Validate the installed payload and original licence before using it."""
     state = long_path(state)
@@ -259,6 +276,8 @@ def verified_content(state: Path, id: str, *, require_enabled: bool = False) -> 
     if require_enabled and content != active:
         raise ValueError("enable the imported package first")
     record = import_record(state / "dlc" / (id + ".json"))
+    if record and record.get("kind") == GENERATED:
+        return content, verified_livery(content, header, record), record
     package = next((p for p in catalog()["packages"] if p["package_id"] == id), None)
     if not package or not record:
         raise ValueError("import record is damaged; import the original package again")
@@ -491,7 +510,8 @@ def install_folder(source: Path, state: Path, extractor: Path) -> dict:
                 continue
             rows.append(dict(file=str(path), status="imported" if records() != before else "already installed"))
     for record in list_content(state):
-        if not record.get("enabled"):
+        # A livery car the player turned off stays off; only owned DLC is enabled here.
+        if not record.get("enabled") and record.get("kind") != GENERATED:
             try:
                 set_enabled(state, record["package_id"], True)
             except ValueError as error:
@@ -499,16 +519,111 @@ def install_folder(source: Path, state: Path, extractor: Path) -> dict:
     return dict(files=rows, packages=list_content(state))
 
 
-def main() -> int:
+# -- livery cars ----------------------------------------------------------------
+
+def _tool(name: str):
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(name.replace("-", "_"), Path(__file__).with_name(name + ".py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def livery_records(state: Path) -> list[dict]:
+    """The import records of every installed livery package, enabled or disabled."""
+    records = [import_record(path) for path in sorted((long_path(state) / "dlc").glob("*.json"))]
+    return [record for record in records if record and record.get("kind") == GENERATED]
+
+
+def _sha256(path: Path) -> str:
+    with path.open("rb") as stream:
+        return hashlib.file_digest(stream, "sha256").hexdigest().upper()
+
+
+def install_livery(state: Path, game_root: Path, extractor: Path, recipe_path: Path, art_dir: Path | None = None,
+                   *, panels: Path | None = None, ids: Path | None = None) -> dict:
+    """Build a livery car's package from its recipe and the player's own files
+    (tools/package-fh1-livery.py) and install it beside the owned DLC, enabled.
+    A car that is already installed is built again and replaced in place,
+    keeping its enabled state; the old copy is kept under dlc/replaced/. The
+    build reads the installed set without the car's own package, and gets the
+    names of the other enabled livery cars for its string tables. Refused while
+    the game runs, when another livery package holds one of the car's string
+    keys, and when the car's package ID holds content this tool did not build."""
+    paint, package, clone = _tool("paint-fh1-livery"), _tool("package-fh1-livery"), _tool("clone-fh1-car")
+    panels, ids = panels or paint.PANEL_TABLES, ids or paint.ID_TABLE
+    recipe = paint.load_recipe(recipe_path, art_dir=art_dir, panel_tables=panels, id_table=ids)
+    art_dir = Path(art_dir) if art_dir is not None else paint.ART_ROOT / Path(recipe_path).stem
+    thumbnail = json.loads(Path(recipe_path).read_text(encoding="utf-8")).get("thumbnail")
+    id = package.package_id(recipe.car["new_id"])
+    state = long_path(state)
+    with mutation_lock(state):
+        active, inactive, header = package_paths(state, id)
+        record_path = state / "dlc" / (id + ".json")
+        if active.exists() and inactive.exists():
+            raise ValueError(f'{recipe.car["display_name"]}: both enabled and disabled copies exist')
+        installed = active if active.exists() else inactive if inactive.exists() else None
+        previous = import_record(record_path) if record_path.is_file() else None
+        if (installed is not None or record_path.exists()) and (previous is None or previous.get("kind") != GENERATED):
+            raise ValueError(f"package {id} holds content this tool did not build; leave it in place")
+        others = [record for record in livery_records(state) if record["package_id"] != id]
+        entries = [entry for record in others if package_paths(state, record["package_id"])[0].is_dir()
+                   for entry in record.get("string_keys", [])]
+        with tempfile.TemporaryDirectory(prefix="staging-", dir=state / "dlc") as directory:
+            staging = Path(directory)
+            sources = clone.Sources(state, Path(game_root).absolute(), extractor, exclude={id})
+            report, header_data = package.build_package(recipe, sources, staging / "content", id_table=ids,
+                                                        others=entries)
+            keys = {entry["key"] for entry in report["string_keys"]}
+            for other in others:
+                taken = sorted(keys & {entry["key"] for entry in other.get("string_keys", [])})
+                if taken:
+                    raise ValueError(f'string key {taken[0]} of {recipe.car["display_name"]} is also used by '
+                                     f'{other.get("display_name", other["package_id"])}; give one of the cars another ID')
+            files, digest = payload_catalog(staging / "content")
+            art = sorted(set(recipe.art) | ({thumbnail} if thumbnail else set()))
+            record = dict(package_id=id, display_name=report["header_name"], kind=GENERATED, generator="livery-package",
+                          car_id=recipe.car["new_id"], stock_id=recipe.car["stock_id"], recipe=str(recipe_path),
+                          recipe_sha256=_sha256(Path(recipe_path)), art_sha256={name: _sha256(art_dir / name) for name in art},
+                          string_keys=report["string_keys"], payload_sha256=digest, file_count=len(files),
+                          license_mask=LIVERY_MASK, header_sha256=hashlib.sha256(header_data).hexdigest().upper())
+            staged_header = staging / "header"
+            staged_header.write_bytes(header_data)
+            header.parent.mkdir(parents=True, exist_ok=True)
+            active.parent.mkdir(parents=True, exist_ok=True)
+            # As import_content: header and record first, the content becomes visible last.
+            staged_header.replace(header)
+            write_json(record_path, record)
+            if installed is not None:
+                retained = state / "dlc" / "replaced" / id / uuid.uuid4().hex
+                retained.parent.mkdir(parents=True, exist_ok=True)
+                installed.rename(retained)
+                try:
+                    (staging / "content").rename(installed)
+                except OSError:
+                    retained.rename(installed)
+                    raise
+            else:
+                (staging / "content").rename(active)
+        verified_content(state, id)
+    return dict(livery=report, packages=list_content(state))
+
+
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("list", "import", "install-folder", "enable", "disable"))
+    parser.add_argument("action", choices=("list", "import", "install-folder", "enable", "disable", "install-livery"))
     parser.add_argument("--state-root", type=Path, required=True)
     parser.add_argument("--source", type=Path)
     parser.add_argument("--package-id")
     parser.add_argument("--game-root", type=Path, default=ROOT / ".local/game/base")
     parser.add_argument("--extractor", type=Path,
                         help=f"archive extractor (default: the first of {', '.join(EXTRACTOR_BUILDS)})")
-    args = parser.parse_args()
+    parser.add_argument("--recipe", type=Path, help="install-livery: the livery car's recipe (config/livery-cars/)")
+    parser.add_argument("--art", type=Path, help="install-livery: its art folder (default: .local/livery-art/<recipe>)")
+    parser.add_argument("--panels", type=Path, help=argparse.SUPPRESS)
+    parser.add_argument("--ids", type=Path, help=argparse.SUPPRESS)
+    args = parser.parse_args(argv)
     args.extractor = args.extractor or default_extractor()
     try:
         state = args.state_root.resolve()
@@ -516,6 +631,13 @@ def main() -> int:
             if args.source is None or not args.source.is_dir():
                 raise ValueError("choose the folder that holds your DLC")
             print(json.dumps(install_folder(args.source.resolve(), state, args.extractor.resolve())))
+            return 0
+        if args.action == "install-livery":
+            if args.recipe is None:
+                raise ValueError("choose a livery recipe")
+            # CreateProcess needs the extractor as an absolute Windows path.
+            print(json.dumps(install_livery(state, args.game_root.resolve(), args.extractor.resolve(), args.recipe,
+                                            args.art, panels=args.panels, ids=args.ids)))
             return 0
         if args.action == "list":
             records = list_content(state)
